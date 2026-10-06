@@ -32,8 +32,11 @@ describe('envValidationSchema — SWAGGER_ENABLED', () => {
   });
 
   it('should apply default false when SWAGGER_ENABLED is not set', () => {
-    const { value, error } = validate({});
-    expect(error).toBeUndefined();
-    expect(value.SWAGGER_ENABLED).toBe('false');
+    const result = validate({}) as {
+      value: { SWAGGER_ENABLED: string };
+      error?: unknown;
+    };
+    expect(result.error).toBeUndefined();
+    expect(result.value.SWAGGER_ENABLED).toBe('false');
   });
 });
