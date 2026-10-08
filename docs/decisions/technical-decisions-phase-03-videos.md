@@ -1,7 +1,7 @@
 ---
 scope_type: phase
 related_phases: [3]
-status: pending
+status: decided
 date: 2026-10-06
 scope_description: "Fase 03 — armazenamento de vídeos, fila de processamento, upload de até 10GB, worker FFmpeg, URL única, streaming e download"
 ---
@@ -55,7 +55,8 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A (BullMQ + Redis). O retry com backoff e o estado de falha nativos reduzem código próprio no ciclo de status, e a integração com NestJS 11 é oficial. O custo é um serviço Redis no Compose, aceitável. Option B é alternativa válida se a meta for zero infraestrutura nova; registra-se que perde-se o enqueue transacional, mitigado com TD-08 (linha de vídeo criada antes do enqueue).
 
-**Decision:** _[pending]_
+**Decision:** A (BullMQ + Redis)
+**Libraries:** bullmq, @nestjs/bullmq
 
 ---
 
@@ -86,7 +87,8 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A. É a única opção em que a API não processa os bytes, cumpre a retomada por parte e usa o padrão S3 que o MinIO implementa. A Option B seria comparável em retomada, mas traz o ESM-only e o tráfego pela API. Definir na implementação: tamanho de parte (ex.: 16 MiB → 640 partes para 10GB), TTL das URLs assinadas e regra de lifecycle para uploads abandonados.
 
-**Decision:** _[pending]_
+**Decision:** A (Multipart upload com URLs assinadas por parte, direto ao storage)
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
 
@@ -117,7 +119,7 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A. Reusa o backend (entidades, config, repositórios), evita o wrapper deprecated e mantém o FFmpeg isolado na imagem do worker. Definir na implementação: se a API usa a mesma imagem (com FFmpeg) ou se o serviço `video-worker` usa imagem própria a partir da mesma base.
 
-**Decision:** _[pending]_
+**Decision:** A (Mesmo codebase e imagem, entrypoint dedicado, ffprobe via child_process)
 
 ---
 
@@ -148,7 +150,7 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A. Custo previsível em vídeos grandes e qualidade aceitável para uma fase sem curadoria de thumbnail (customização é Fase 04). A Option B é candidata a melhoria futura, não a esta fase.
 
-**Decision:** _[pending]_
+**Decision:** A (Frame em 10% da duração, mínimo 1s)
 
 ---
 
@@ -179,7 +181,7 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A, com chaves por UUID interno e nunca por slug. Mantém uma configuração de bucket e desacopla storage de URL.
 
-**Decision:** _[pending]_
+**Decision:** A (Bucket único, prefixo por UUID interno)
 
 ---
 
@@ -210,7 +212,7 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A. Atende "curta e única" sem dependência e sem o problema ESM-only. O retry em colisão usa o constraint, como o padrão de nickname da Fase 02 (SI-02.6).
 
-**Decision:** _[pending]_
+**Decision:** A (base62 de 11 caracteres via node:crypto)
 
 ---
 
@@ -241,7 +243,8 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A. Segue o diagrama, aproveita o `Range` do storage e mantém a API fora do fluxo de bytes. O risco do bearer temporário é aceitável nesta fase, porque visibilidade e autorização de vídeo são Fase 04; o TTL curto mitiga.
 
-**Decision:** _[pending]_
+**Decision:** A (URL GET assinada emitida pela API, servida direto pelo storage)
+**Libraries:** @aws-sdk/s3-request-presigner
 
 ---
 
@@ -272,7 +275,7 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A. Cumpre o ciclo do enunciado e torna falhas transitórias invisíveis ao usuário, com `error_reason` e tentativas gravados. Uploads abandonados em `rascunho` são tratados pela regra de lifecycle de TD-02.
 
-**Decision:** _[pending]_
+**Decision:** A (Ciclo do enunciado com retries internos a processando)
 
 ---
 
@@ -303,7 +306,7 @@ _Subprojects in scope:_
 
 **Recommendation:** Option A. É a única que aplica o limite de 10GB de forma verificável (soma de `ListParts`) e mantém a validação de mídia no `ffprobe`, que é a fonte confiável de formato. A Option C duplica o `ffprobe` com heurística frágil. Definir na implementação: a lista exata de `contentType` permitidos e o `error_reason` para mídia inválida, coerente com o catálogo de erros do plano.
 
-**Decision:** _[pending]_
+**Decision:** A (Declaração + soma de ListParts + ffprobe)
 
 ---
 
@@ -311,12 +314,12 @@ _Subprojects in scope:_
 
 | ID | Scope | Decision | Recommendation | Choice |
 |----|-------|----------|---------------|--------|
-| TD-01 | Backend | Fila de processamento | A (BullMQ + Redis) | _[pending]_ |
-| TD-02 | Cross-layer | Estratégia de upload 10GB | A (multipart com URLs assinadas por parte) | _[pending]_ |
-| TD-03 | Backend | Runtime do worker e extração de metadados | A (mesmo codebase, entrypoint dedicado, ffprobe via child_process) | _[pending]_ |
-| TD-04 | Backend | Política de thumbnail | A (frame em 10% da duração) | _[pending]_ |
-| TD-05 | Backend | Convenção de chaves e buckets | A (bucket único, prefixo por UUID interno) | _[pending]_ |
-| TD-06 | Backend | Identificador de URL única | A (base62 de 11 caracteres via node:crypto) | _[pending]_ |
-| TD-07 | Cross-layer | Streaming e download | A (URL GET assinada emitida pela API, direto do storage) | _[pending]_ |
-| TD-08 | Backend | Ciclo de status e falha | A (ciclo do enunciado com retries internos) | _[pending]_ |
-| TD-09 | Backend | Validação do arquivo e limite de 10GB | A (declaração + soma de ListParts + ffprobe) | _[pending]_ |
+| TD-01 | Backend | Fila de processamento | A (BullMQ + Redis) | A |
+| TD-02 | Cross-layer | Estratégia de upload 10GB | A (multipart com URLs assinadas por parte) | A |
+| TD-03 | Backend | Runtime do worker e extração de metadados | A (mesmo codebase, entrypoint dedicado, ffprobe via child_process) | A |
+| TD-04 | Backend | Política de thumbnail | A (frame em 10% da duração) | A |
+| TD-05 | Backend | Convenção de chaves e buckets | A (bucket único, prefixo por UUID interno) | A |
+| TD-06 | Backend | Identificador de URL única | A (base62 de 11 caracteres via node:crypto) | A |
+| TD-07 | Cross-layer | Streaming e download | A (URL GET assinada emitida pela API, direto do storage) | A |
+| TD-08 | Backend | Ciclo de status e falha | A (ciclo do enunciado com retries internos) | A |
+| TD-09 | Backend | Validação do arquivo e limite de 10GB | A (declaração + soma de ListParts + ffprobe) | A |

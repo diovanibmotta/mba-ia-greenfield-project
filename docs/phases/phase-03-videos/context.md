@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-05T06:41:42-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-08T07:44:04-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-08T07:48:15-03:00"
   docs/decisions/technical-decisions-phase-01-configuracao-base.md: "2026-10-05T06:41:42-03:00"
   docs/decisions/technical-decisions-phase-02-auth.md: "2026-10-05T06:41:42-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-05T06:41:42-03:00"
@@ -47,15 +47,15 @@ sources_mtime:
 
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
-| phase-03-videos/TD-01 | phase | Backend | Fila de processamento (tecnologia de fila) | pending | — | — |
-| phase-03-videos/TD-02 | phase | Cross-layer | Estratégia de upload de arquivos de até 10GB | pending | — | — |
-| phase-03-videos/TD-03 | phase | Backend | Runtime do worker e extração de metadados | pending | — | — |
-| phase-03-videos/TD-04 | phase | Backend | Política de geração de thumbnail | pending | — | — |
-| phase-03-videos/TD-05 | phase | Backend | Convenção de chaves e buckets no object storage | pending | — | — |
-| phase-03-videos/TD-06 | phase | Backend | Identificador de URL única por vídeo | pending | — | — |
-| phase-03-videos/TD-07 | phase | Cross-layer | Estratégia de streaming e download | pending | — | — |
-| phase-03-videos/TD-08 | phase | Backend | Ciclo de status do vídeo e tratamento de falha | pending | — | — |
-| phase-03-videos/TD-09 | phase | Backend | Validação do arquivo enviado e aplicação do limite de 10GB | pending | — | — |
+| phase-03-videos/TD-01 | phase | Backend | Fila de processamento (tecnologia de fila) | decided | A (BullMQ + Redis) | bullmq, @nestjs/bullmq |
+| phase-03-videos/TD-02 | phase | Cross-layer | Estratégia de upload de arquivos de até 10GB | decided | A (Multipart upload com URLs assinadas por parte) | @aws-sdk/client-s3, @aws-sdk/s3-request-presigner |
+| phase-03-videos/TD-03 | phase | Backend | Runtime do worker e extração de metadados | decided | A (Mesmo codebase, entrypoint dedicado, ffprobe via child_process) | — |
+| phase-03-videos/TD-04 | phase | Backend | Política de geração de thumbnail | decided | A (Frame em 10% da duração) | — |
+| phase-03-videos/TD-05 | phase | Backend | Convenção de chaves e buckets no object storage | decided | A (Bucket único, prefixo por UUID) | — |
+| phase-03-videos/TD-06 | phase | Backend | Identificador de URL única por vídeo | decided | A (base62 de 11 caracteres via node:crypto) | — |
+| phase-03-videos/TD-07 | phase | Cross-layer | Estratégia de streaming e download | decided | A (URL GET assinada, direto do storage) | @aws-sdk/s3-request-presigner |
+| phase-03-videos/TD-08 | phase | Backend | Ciclo de status do vídeo e tratamento de falha | decided | A (Ciclo do enunciado com retries internos) | — |
+| phase-03-videos/TD-09 | phase | Backend | Validação do arquivo enviado e aplicação do limite de 10GB | decided | A (Declaração + ListParts + ffprobe) | — |
 
 _Source files:_
 
@@ -77,7 +77,50 @@ _Source files:_
 
 ## Decisions Detail
 
-_No current-scope TDs decided yet (all 9 TDs of phase-03-videos are `pending`; `/plan-resolve` fills them)._
+### phase-03-videos/TD-01
+
+**Recommendation:** BullMQ + Redis. Retry com backoff e estado de falha nativos reduzem código próprio no ciclo de status; integração oficial com NestJS 11. Custo: serviço Redis no Compose; enqueue não é transacional com o banco, mitigado criando a linha do vídeo antes do enqueue (TD-08).
+**Libraries:** bullmq, @nestjs/bullmq
+
+### phase-03-videos/TD-02
+
+**Recommendation:** Multipart upload com URLs assinadas por parte (`UploadPart`), direto ao MinIO/S3: a API cria o rascunho e o multipart upload, emite URLs por parte, lista partes enviadas (`ListParts`) para retomar e finaliza com `CompleteMultipartUpload`. Definir na implementação: tamanho de parte (ex.: 16 MiB → 640 partes para 10GB), TTL das URLs e lifecycle para uploads abandonados.
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
+
+### phase-03-videos/TD-03
+
+**Recommendation:** Mesmo codebase e imagem, com entrypoint dedicado do NestJS (application context sem HTTP) e `ffmpeg`/`ffprobe` instalados; extração via `ffprobe -print_format json` por `child_process`. Evita o wrapper deprecated `fluent-ffmpeg`. Definir na implementação: se a API compartilha a imagem com FFmpeg ou se o serviço `video-worker` usa imagem própria da mesma base.
+**Libraries:** —
+
+### phase-03-videos/TD-04
+
+**Recommendation:** Frame em posição relativa fixa (10% da duração, mínimo 1s), calculada a partir da duração obtida pelo ffprobe. Determinístico e barato em vídeos grandes; thumbnail customizada é Fase 04.
+**Libraries:** —
+
+### phase-03-videos/TD-05
+
+**Recommendation:** Bucket único com chaves por UUID interno: `videos/{videoId}/original.{ext}` e `videos/{videoId}/thumbnail.jpg`; nunca por slug. Uma configuração de bucket e de CORS/lifecycle; storage desacoplado da URL pública.
+**Libraries:** —
+
+### phase-03-videos/TD-06
+
+**Recommendation:** ID aleatório curto em base62 (11 caracteres) gerado com `node:crypto`, unique constraint no banco e retry em colisão (mesmo padrão do nickname da Fase 02). Sem dependência nova e sem o problema ESM-only do nanoid v5.
+**Libraries:** —
+
+### phase-03-videos/TD-07
+
+**Recommendation:** URL GET assinada emitida pela API com TTL curto, servida direto pelo storage (`Range`/206 nativo; `response-content-disposition` para download com nome de arquivo). Segue `docs/diagrams/software-arch.mermaid`; API fora do fluxo de bytes. Risco do bearer temporário aceito nesta fase; visibilidade é Fase 04.
+**Libraries:** @aws-sdk/s3-request-presigner
+
+### phase-03-videos/TD-08
+
+**Recommendation:** Ciclo do enunciado `rascunho → processando → pronto|erro`, com retries internos ao estado `processando` (backoff do BullMQ); `erro` só após esgotar tentativas, com `error_reason` e número de tentativas gravados. Uploads abandonados em `rascunho` são tratados pelo lifecycle do TD-02.
+**Libraries:** —
+
+### phase-03-videos/TD-09
+
+**Recommendation:** Validação em três pontos: (1) na criação do upload, a API exige `fileSize` e `contentType` declarados e rejeita (400) acima de 10GiB ou fora da lista de contêineres de vídeo permitidos; (2) na finalização, soma o `Size` de `ListParts` e, se exceder o limite ou divergir do declarado, executa `AbortMultipartUpload`; (3) o worker valida com `ffprobe` que há stream de vídeo, senão marca `erro` com `error_reason` de mídia inválida, sem retry. Definir na implementação: lista de `contentType` e o `error_reason`.
+**Libraries:** —
 
 ## Inherited Decisions Detail
 
