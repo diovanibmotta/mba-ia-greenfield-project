@@ -4,8 +4,8 @@ name: phase-03-videos
 status: dirty
 issue_count: 11
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-10-08T07:20:11-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-06T08:32:46-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-10-08T07:44:16-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-08T07:44:04-03:00"
 issues:
   - id: AMB-1
     status: open
@@ -14,8 +14,9 @@ issues:
     status: open
     summary: "Origem do título no pré-cadastro do rascunho não definida"
   - id: MD-1
-    status: open
+    status: resolved
     summary: "Sem TD de formatos aceitos e validação do arquivo enviado"
+    resolved_by: phase-03-videos/TD-09
   - id: OQ-1
     status: open
     summary: "phase-03-videos/TD-01 pending — fila"
@@ -40,6 +41,9 @@ issues:
   - id: OQ-8
     status: open
     summary: "phase-03-videos/TD-08 pending — ciclo de status e falha"
+  - id: OQ-9
+    status: open
+    summary: "phase-03-videos/TD-09 pending — validação do arquivo e limite 10GB"
 advisories: []
 ---
 
@@ -58,7 +62,7 @@ _None._
 
 ### Missing Decisions
 
-- **MD-1** — Nenhum TD decide quais formatos/contêineres de vídeo são aceitos, como o limite de 10GB é aplicado (tamanho declarado na criação do upload versus verificado no `CompleteMultipartUpload`) e o que acontece quando o arquivo enviado não é um vídeo válido (falha no `ffprobe`). Isso é estratégia de validação, distinta do ciclo de falha do TD-08. Explicit choice: rodar `/research` para adicionar um TD cobrindo validação de arquivo, ou estender explicitamente o TD-02/TD-08 em `/plan-resolve`.
+_None._
 
 ### Dependency Gaps
 
@@ -78,6 +82,7 @@ _None._
 - **OQ-6** — phase-03-videos/TD-06 pending — Identificador de URL única. Resolution: idem OQ-1.
 - **OQ-7** — phase-03-videos/TD-07 pending — Streaming e download. Resolution: idem OQ-1.
 - **OQ-8** — phase-03-videos/TD-08 pending — Ciclo de status e falha. Resolution: idem OQ-1.
+- **OQ-9** — phase-03-videos/TD-09 pending — Validação do arquivo e limite de 10GB. Resolution: idem OQ-1.
 
 ### UI Coverage Gaps
 
@@ -85,4 +90,4 @@ _None._
 
 ## Resolved Issues
 
-_No issues resolved yet._
+- **MD-1** _(resolved_by phase-03-videos/TD-09)_ — Sem TD de formatos aceitos e validação do arquivo enviado.

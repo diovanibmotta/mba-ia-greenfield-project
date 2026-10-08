@@ -10,7 +10,7 @@ scope_description: "Fase 03 — armazenamento de vídeos, fila de processamento,
 
 _Subprojects in scope:_
 
-- `nestjs-project/` — backend: módulo de vídeos, fila, worker, storage, migration. Recebe TD-01 a TD-08.
+- `nestjs-project/` — backend: módulo de vídeos, fila, worker, storage, migration. Recebe TD-01 a TD-09.
 - `next-frontend/` — sem TD de implementação nesta fase. A interface de vídeo está fora do escopo (enunciado). TD-02 e TD-07 definem o contrato de upload e de streaming que o frontend consumirá em fase futura, então ficam registrados como cross-layer.
 
 **Constraints herdados (não reabertos):** `@nestjs/config` + Joi (Fase 01); JWT com guard global e `@Public()` (Fase 02); `DomainException` + `DomainExceptionFilter` com formato `{ statusCode, error, message }` (Fase 02); `@nestjs/throttler` (Fase 02); OpenAPI com `openapi.json` exportado (decisão cross-layer existente); PostgreSQL 17 como banco principal; Docker Compose como único ambiente; object storage = MinIO local / S3 em produção (não é decisão).
@@ -276,6 +276,37 @@ _Subprojects in scope:_
 
 ---
 
+## TD-09: Validação do arquivo enviado e aplicação do limite de 10GB
+
+**Scope:** Backend
+
+**Capability:** Transversal — covers: Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance; Processamento automático do vídeo após upload (extração de duração e metadados)
+
+**Context:** Com upload direto ao storage (TD-02), os bytes não passam pela API, então nada impede por padrão um arquivo acima de 10GB ou que não seja vídeo. A URL assinada de `UploadPart` não limita o tamanho total, e o cliente é não confiável. É preciso decidir onde o limite e o formato são verificados e o que acontece com arquivo inválido, sem duplicar o ciclo de falha do TD-08. Origem: MD-1 do `validation.md` da fase.
+
+**Options:**
+
+### Option A: Validação em três pontos (declaração, finalização e worker)
+- Na criação do upload, a API exige `fileSize` e `contentType` declarados, rejeita (400) tamanho acima de 10GiB ou `contentType` fora de uma lista de contêineres de vídeo permitidos, e calcula o número de partes a partir do `fileSize`. Na finalização, a API soma o `Size` retornado por `ListParts`; se a soma exceder o limite ou divergir do declarado, executa `AbortMultipartUpload` e rejeita. O worker valida com `ffprobe` que existe ao menos um stream de vídeo; caso contrário marca `erro` com `error_reason` de mídia inválida, sem retry (falha determinística).
+- **Pros:** o limite é aplicado de forma verificável (soma real das partes), não apenas declarada; lixo é descartado antes de gastar processamento; falha de mídia inválida não consome retries do TD-08.
+- **Cons:** três pontos de validação a testar; a lista de contêineres permitidos é uma política a manter.
+
+### Option B: Validação só no worker
+- A API aceita qualquer arquivo; o `ffprobe` do worker rejeita o que não for vídeo.
+- **Pros:** mais simples; um único ponto.
+- **Cons:** aceita e armazena 10GB+ de conteúdo inválido; o limite de 10GB não é aplicado de fato; custo de storage e de processamento desperdiçado.
+
+### Option C: Option A mais inspeção de magic bytes na finalização
+- Além de A, a API lê os primeiros bytes do objeto com `GET` com `Range` e confere a assinatura do contêiner antes de enfileirar.
+- **Pros:** rejeita não-vídeo antes de enfileirar, de forma síncrona.
+- **Cons:** round-trip extra ao storage por upload; assinaturas por contêiner são frágeis (ex.: MP4 varia por brand), duplicando o que o `ffprobe` já faz melhor.
+
+**Recommendation:** Option A. É a única que aplica o limite de 10GB de forma verificável (soma de `ListParts`) e mantém a validação de mídia no `ffprobe`, que é a fonte confiável de formato. A Option C duplica o `ffprobe` com heurística frágil. Definir na implementação: a lista exata de `contentType` permitidos e o `error_reason` para mídia inválida, coerente com o catálogo de erros do plano.
+
+**Decision:** _[pending]_
+
+---
+
 ## Decisions Summary
 
 | ID | Scope | Decision | Recommendation | Choice |
@@ -288,3 +319,4 @@ _Subprojects in scope:_
 | TD-06 | Backend | Identificador de URL única | A (base62 de 11 caracteres via node:crypto) | _[pending]_ |
 | TD-07 | Cross-layer | Streaming e download | A (URL GET assinada emitida pela API, direto do storage) | _[pending]_ |
 | TD-08 | Backend | Ciclo de status e falha | A (ciclo do enunciado com retries internos) | _[pending]_ |
+| TD-09 | Backend | Validação do arquivo e limite de 10GB | A (declaração + soma de ListParts + ffprobe) | _[pending]_ |

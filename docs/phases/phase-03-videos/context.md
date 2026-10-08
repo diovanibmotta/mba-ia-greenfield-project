@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-05T06:41:42-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-06T08:32:46-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-08T07:44:04-03:00"
   docs/decisions/technical-decisions-phase-01-configuracao-base.md: "2026-10-05T06:41:42-03:00"
   docs/decisions/technical-decisions-phase-02-auth.md: "2026-10-05T06:41:42-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-05T06:41:42-03:00"
@@ -55,6 +55,7 @@ sources_mtime:
 | phase-03-videos/TD-06 | phase | Backend | Identificador de URL única por vídeo | pending | — | — |
 | phase-03-videos/TD-07 | phase | Cross-layer | Estratégia de streaming e download | pending | — | — |
 | phase-03-videos/TD-08 | phase | Backend | Ciclo de status do vídeo e tratamento de falha | pending | — | — |
+| phase-03-videos/TD-09 | phase | Backend | Validação do arquivo enviado e aplicação do limite de 10GB | pending | — | — |
 
 _Source files:_
 
@@ -66,9 +67,9 @@ _Source files:_
 |-----------------------------------|------------|
 | Serviço de armazenamento de arquivos (vídeos e thumbnails) | phase-03-videos/TD-05 |
 | Serviço de processamento em segundo plano (filas) | phase-03-videos/TD-01 |
-| Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance | phase-03-videos/TD-02 |
+| Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance | phase-03-videos/TD-02, phase-03-videos/TD-09 |
 | Pré-cadastro automático do vídeo como rascunho ao iniciar o upload | phase-03-videos/TD-08 |
-| Processamento automático do vídeo após upload (extração de duração e metadados) | phase-03-videos/TD-03, phase-03-videos/TD-08 |
+| Processamento automático do vídeo após upload (extração de duração e metadados) | phase-03-videos/TD-03, phase-03-videos/TD-08, phase-03-videos/TD-09 |
 | Geração automática de thumbnail a partir de um frame do vídeo | phase-03-videos/TD-04 |
 | URL única por vídeo, sem conflito com outros vídeos | phase-03-videos/TD-06 |
 | Reprodução via streaming (sem necessidade de download completo) | phase-03-videos/TD-07 |
@@ -76,7 +77,7 @@ _Source files:_
 
 ## Decisions Detail
 
-_No current-scope TDs decided yet (all 8 TDs of phase-03-videos are `pending`; `/plan-resolve` fills them)._
+_No current-scope TDs decided yet (all 9 TDs of phase-03-videos are `pending`; `/plan-resolve` fills them)._
 
 ## Inherited Decisions Detail
 
