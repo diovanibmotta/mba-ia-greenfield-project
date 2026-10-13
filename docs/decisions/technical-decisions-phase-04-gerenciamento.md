@@ -54,6 +54,8 @@ _Subprojects in scope:_
 **Recommendation:** Option A — separa processamento de publicação sem reabrir os TDs da Fase 03 e entrega o "tempo de publicação" do painel de graça. Regras associadas à recomendação: publicar exige `status = pronto` (senão `409 VIDEO_NOT_READY`), título preenchido e categoria definida (a categoria sustenta as sugestões da Fase 05 e o filtro da Fase 07); edição de título, descrição, categoria, thumbnail e visibilidade é permitida em qualquer status exceto `rascunho` com upload aberto; vídeo `pronto` mas não publicado é visível só ao dono (regra atual de "não pronto"); despublicar fica fora da fase, pois o plano só descreve rascunho → publicação.
 
 **Decision:** A (published_at + visibility, ortogonal ao status técnico)
+**Revisions:**
+- 2026-10-13 — Contrato do estado exposto ao painel definido: a API devolve `publicationState` ∈ {`uploading`, `processing`, `error`, `unpublished`, `published`}, derivado de `status`, `published_at` e `visibility` (`uploading` = `rascunho` técnico com upload aberto; `unpublished` = `pronto` sem `published_at`); `status`, `visibility` e `published_at` continuam expostos. Rótulos do painel: Enviando, Processando, Erro, Rascunho, Publicado (Público/Não listado). Rationale: o "rascunho" do bullet "Fluxo de rascunho → publicação" colidia com o `rascunho` técnico da Fase 03 (AMB-2).
 
 ---
 
@@ -85,6 +87,8 @@ _Subprojects in scope:_
 **Recommendation:** Option A — dá integridade referencial e leitura simples para as Fases 05/07 sem criar administração que o plano não pede. Lista inicial sugerida para a migration (a confirmar): Educação, Entretenimento, Esportes, Jogos, Música, Notícias, Tecnologia, Outros.
 
 **Decision:** A (tabela categories semeada por migration, API somente leitura)
+**Revisions:**
+- 2026-10-13 — Lista inicial confirmada para o seed: Educação, Entretenimento, Esportes, Jogos, Música, Notícias, Tecnologia, Outros (slug em kebab-case sem acento; ordem alfabética com "Outros" por último). Rationale: a lista estava marcada como "a confirmar" na recomendação (AMB-1).
 
 ---
 
