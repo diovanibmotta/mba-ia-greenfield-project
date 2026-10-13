@@ -11,6 +11,7 @@ import {
   CategoryNotFoundException,
   CategoryRequiredException,
   FileTooLargeException,
+  InvalidThumbnailException,
   InvalidPartListException,
   InvalidPartNumberException,
   InvalidUploadStateException,
@@ -38,11 +39,13 @@ import { PlaybackUrlResponseDto } from './dto/playback-url-response.dto';
 import { PublishVideoDto } from './dto/publish-video.dto';
 import { UpdateVideoDto } from './dto/update-video.dto';
 import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
+import { ThumbnailResponseDto } from './dto/thumbnail-response.dto';
 import { VideoResponseDto } from './dto/video-response.dto';
 import { Video } from './entities/video.entity';
 import { isPgUniqueViolationOnColumn } from './pg-errors.util';
 import { derivePublicationState, isPublished } from './publication-state.util';
 import { generatePublicId } from './public-id.util';
+import { ThumbnailImageService } from './thumbnail-image.service';
 import { ALLOWED_VIDEO_CONTENT_TYPES } from './video.constants';
 import { VideoStatus } from './video-status.enum';
 
@@ -63,6 +66,7 @@ export class VideosService {
     private readonly queueSettings: ConfigType<typeof queueConfig>,
     @InjectRepository(Category)
     private readonly categories: Repository<Category>,
+    private readonly thumbnails: ThumbnailImageService,
   ) {}
 
   async createDraft(
@@ -392,6 +396,25 @@ export class VideosService {
       relations: { category: true },
     });
     return this.toResponse(published, true);
+  }
+
+  async replaceThumbnail(
+    userId: string,
+    publicId: string,
+    file: { buffer: Buffer } | undefined,
+  ): Promise<ThumbnailResponseDto> {
+    const video = await this.findOwnedVideo(userId, publicId);
+    this.assertEditable(video);
+    if (!file?.buffer?.length) {
+      throw new InvalidThumbnailException();
+    }
+
+    const image = await this.thumbnails.normalize(file.buffer);
+    const key = `videos/${video.id}/thumbnail-custom.jpg`;
+    await this.storage.putObject(key, image, 'image/jpeg');
+    await this.videos.update({ id: video.id }, { thumbnail_key: key });
+
+    return { thumbnailUrl: await this.storage.presignGetObject(key) };
   }
 
   /** Metadata cannot change while the upload is still open. */

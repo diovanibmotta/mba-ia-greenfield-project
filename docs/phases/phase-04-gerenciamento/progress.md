@@ -1,7 +1,7 @@
 # phase-04-gerenciamento — Progress
 
 **Status:** in_progress
-**SIs:** 7/13 completed
+**SIs:** 8/13 completed
 
 ### SI-04.1 — Infra: sharp, tipos do Multer, configuração de thumbnail e exceções de domínio
 - **Status:** completed
@@ -67,9 +67,13 @@ test/videos-publish.e2e-spec.ts authored from specs/videos-publish.plan.md.
 Env note: tests must run inside nestjs-api container (hosts db/redis/minio); host-side npm ci corrupts shared Linux node_modules, was reinstalled in container.
 
 ### SI-04.8 — Endpoint PUT /videos/:publicId/thumbnail
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 136 passing (src/videos) + 7 e2e
+- **Observations:**
+ThumbnailUploadInterceptor extends FileInterceptor('file') and maps Multer PayloadTooLarge/BadRequest to ThumbnailTooLarge/InvalidThumbnail domain exceptions.
+ThumbnailImageService appended as LAST VideosService constructor param; MulterModule.registerAsync limits fileSize to thumbnailMaxBytes.
+Response is { thumbnailUrl } (ThumbnailResponseDto). 2000x1500 input becomes 960x720 (fit inside 1280x720).
+Env note: run jest inside nestjs-api container (docker exec); never npm ci from Windows host.
 
 ### SI-04.9 — Endpoint GET /me/channel
 - **Status:** pending

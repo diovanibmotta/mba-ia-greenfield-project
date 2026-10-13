@@ -13,6 +13,7 @@ import {
   VideoNotFoundException,
   VideoNotReadyException,
   CategoryNotFoundException,
+  InvalidThumbnailException,
   CategoryRequiredException,
   VideoAlreadyPublishedException,
   VideoUploadInProgressException,
@@ -22,6 +23,7 @@ import { StorageService } from '../storage/storage.service';
 import { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
 import { VideoVisibility } from './video-visibility.enum';
+import { ThumbnailImageService } from './thumbnail-image.service';
 import { VideosService } from './videos.service';
 
 const config = {
@@ -50,6 +52,7 @@ function uniqueViolation(): QueryFailedError {
 }
 
 describe('VideosService', () => {
+  let thumbnails: { normalize: jest.Mock };
   let videos: {
     create: jest.Mock;
     save: jest.Mock;
@@ -62,6 +65,7 @@ describe('VideosService', () => {
   let categories: { existsBy: jest.Mock };
   let channels: { findOneByOrFail: jest.Mock; findOneBy: jest.Mock };
   let storage: {
+    putObject: jest.Mock;
     createMultipartUpload: jest.Mock;
     presignUploadPart: jest.Mock;
     listParts: jest.Mock;
@@ -89,6 +93,7 @@ describe('VideosService', () => {
       findOneBy: jest.fn().mockResolvedValue({ id: 'channel-1' }),
     };
     storage = {
+      putObject: jest.fn().mockResolvedValue(undefined),
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
       presignUploadPart: jest
         .fn()
@@ -102,6 +107,9 @@ describe('VideosService', () => {
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
     };
     queue = { add: jest.fn().mockResolvedValue({ id: 'job-1' }) };
+    thumbnails = {
+      normalize: jest.fn().mockResolvedValue(Buffer.from('jpeg')),
+    };
     service = new VideosService(
       videos as unknown as Repository<Video>,
       channels as unknown as Repository<Channel>,
@@ -110,6 +118,7 @@ describe('VideosService', () => {
       queue as unknown as Queue<VideoProcessJobData>,
       queueSettings,
       categories as unknown as Repository<Category>,
+      thumbnails as unknown as ThumbnailImageService,
     );
   });
 
@@ -506,6 +515,7 @@ describe('VideosService', () => {
         queue as unknown as Queue<VideoProcessJobData>,
         queueSettings,
         categories as unknown as Repository<Category>,
+        thumbnails as unknown as ThumbnailImageService,
       );
 
       await expect(
@@ -1089,6 +1099,79 @@ describe('VideosService', () => {
 
       await expect(
         service.publishVideo('other-user', 'AAAAAAAAAAA', {}),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('replaceThumbnail', () => {
+    const owned = {
+      id: 'video-1',
+      public_id: 'AAAAAAAAAAA',
+      channel_id: 'channel-1',
+      status: VideoStatus.READY,
+      upload_id: null,
+    } as unknown as Video;
+    const file = { buffer: Buffer.from('png') };
+
+    beforeEach(() => {
+      videos.findOneBy.mockResolvedValue(owned);
+      storage.presignGetObject.mockResolvedValue('https://signed');
+    });
+
+    it('should store the normalized image and point thumbnail_key at it', async () => {
+      const result = await service.replaceThumbnail(
+        'user-1',
+        'AAAAAAAAAAA',
+        file,
+      );
+
+      expect(thumbnails.normalize).toHaveBeenCalledWith(file.buffer);
+      expect(storage.putObject).toHaveBeenCalledWith(
+        'videos/video-1/thumbnail-custom.jpg',
+        Buffer.from('jpeg'),
+        'image/jpeg',
+      );
+      expect(videos.update).toHaveBeenCalledWith(
+        { id: 'video-1' },
+        { thumbnail_key: 'videos/video-1/thumbnail-custom.jpg' },
+      );
+      expect(result).toEqual({ thumbnailUrl: 'https://signed' });
+    });
+
+    it('should reject a request without a file', async () => {
+      await expect(
+        service.replaceThumbnail('user-1', 'AAAAAAAAAAA', undefined),
+      ).rejects.toBeInstanceOf(InvalidThumbnailException);
+      expect(storage.putObject).not.toHaveBeenCalled();
+    });
+
+    it('should not touch storage when the image is invalid', async () => {
+      thumbnails.normalize.mockRejectedValue(new InvalidThumbnailException());
+
+      await expect(
+        service.replaceThumbnail('user-1', 'AAAAAAAAAAA', file),
+      ).rejects.toBeInstanceOf(InvalidThumbnailException);
+      expect(storage.putObject).not.toHaveBeenCalled();
+      expect(videos.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject a draft with an open upload', async () => {
+      videos.findOneBy.mockResolvedValue({
+        ...owned,
+        status: VideoStatus.DRAFT,
+        upload_id: 'upload-1',
+      });
+
+      await expect(
+        service.replaceThumbnail('user-1', 'AAAAAAAAAAA', file),
+      ).rejects.toBeInstanceOf(VideoUploadInProgressException);
+    });
+
+    it('should hide a video the caller does not own', async () => {
+      videos.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.replaceThumbnail('other-user', 'AAAAAAAAAAA', file),
       ).rejects.toBeInstanceOf(VideoNotFoundException);
     });
   });

@@ -8,9 +8,14 @@ import {
   Param,
   Patch,
   Post,
+  Put,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -28,6 +33,8 @@ import { PartUrlsDto } from './dto/part-urls.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { PlaybackUrlResponseDto } from './dto/playback-url-response.dto';
 import { PublishVideoDto } from './dto/publish-video.dto';
+import { ThumbnailResponseDto } from './dto/thumbnail-response.dto';
+import { ThumbnailUploadInterceptor } from './thumbnail-upload.interceptor';
 import { UpdateVideoDto } from './dto/update-video.dto';
 import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { VideoResponseDto } from './dto/video-response.dto';
@@ -374,5 +381,58 @@ export class VideosController {
     @Body() dto: PublishVideoDto,
   ): Promise<VideoResponseDto> {
     return this.videosService.publishVideo(user.sub, publicId, dto);
+  }
+
+  @Put(':publicId/thumbnail')
+  @UseInterceptors(ThumbnailUploadInterceptor)
+  @ApiOperation({
+    summary: 'Replace the video thumbnail',
+    description:
+      'Accepts a JPEG, PNG or WebP image, resizes it to fit 1280x720 and stores it as JPEG.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Thumbnail replaced',
+    type: ThumbnailResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Missing file or not a valid JPEG, PNG or WebP image',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found or not owned by the caller',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Upload still in progress',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 413,
+    description: 'Image above the size limit',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  replaceThumbnail(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+  ): Promise<ThumbnailResponseDto> {
+    return this.videosService.replaceThumbnail(user.sub, publicId, file);
   }
 }

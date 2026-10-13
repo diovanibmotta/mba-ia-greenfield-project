@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -645,6 +646,48 @@ describe('VideosService (integration)', () => {
       await expect(
         service.publishVideo(user.id, processing.public_id, {}),
       ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_READY' });
+    });
+  });
+
+  describe('replaceThumbnail', () => {
+    it('should write the normalized JPEG to storage and update thumbnail_key', async () => {
+      const { user, channel } = await createUserWithChannel(dataSource);
+      const repository = dataSource.getRepository(Video);
+      const video = await repository.save(
+        repository.create({
+          public_id: 'THUMBNAIL01',
+          channel_id: channel.id,
+          title: 'Aula',
+          status: VideoStatus.READY,
+          file_name: 'aula.mp4',
+          content_type: 'video/mp4',
+          declared_size: 1000,
+          storage_key: 'videos/x/original.mp4',
+        }),
+      );
+      const png = await sharp({
+        create: {
+          width: 2000,
+          height: 1500,
+          channels: 3,
+          background: '#336699',
+        },
+      })
+        .png()
+        .toBuffer();
+
+      const result = await service.replaceThumbnail(user.id, video.public_id, {
+        buffer: png,
+      });
+
+      const row = await repository.findOneByOrFail({ id: video.id });
+      expect(row.thumbnail_key).toBe(`videos/${video.id}/thumbnail-custom.jpg`);
+      const response = await fetch(result.thumbnailUrl);
+      expect(response.headers.get('content-type')).toBe('image/jpeg');
+      const meta = await sharp(
+        Buffer.from(await response.arrayBuffer()),
+      ).metadata();
+      expect(meta).toMatchObject({ format: 'jpeg', width: 960, height: 720 });
     });
   });
 });
