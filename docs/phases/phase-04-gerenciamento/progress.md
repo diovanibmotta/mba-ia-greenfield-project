@@ -1,6 +1,6 @@
 # phase-04-gerenciamento — Progress
 
-**Status:** in_progress
+**Status:** completed
 **SIs:** 13/13 completed
 
 ### SI-04.1 — Infra: sharp, tipos do Multer, configuração de thumbnail e exceções de domínio
@@ -113,3 +113,9 @@ listChannelVideos resolves the channel via the existing channels Repository (fin
 Keyset compares date_trunc('milliseconds', published_at) with the ms-precision cursor to avoid repeats on rows with microsecond timestamps (migration backfill).
 cursor is base64url JSON {p: ISO date, i: internal uuid}.
 
+## Completion report
+
+- 13/13 SIs implemented (categories, publication state and access rule, PATCH/publish/thumbnail on videos, /me/channel, /me/videos, /channels/:nickname and its cursor-paginated videos).
+- Verification: `tsc --noEmit`, `nest build`, `eslint` and `openapi:export` clean; `npm test`: 47 suites / 403 tests passing; `openapi.json` regenerated.
+- Environment: run jest inside the `nestjs-api` container (`docker exec`); never `npm ci` from the Windows host.
+- Known caveats: categories service integration test relies on the migration seed; `auth.service.integration-spec` can exceed the 5s hook timeout on a cold ts-jest cache.

@@ -439,6 +439,170 @@
         ]
       }
     },
+    "/me/channel": {
+      "get": {
+        "operationId": "MyChannelController_getMyChannel",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The user has no channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the authenticated user channel",
+        "tags": [
+          "channels"
+        ]
+      },
+      "patch": {
+        "description": "Updates nickname, name and/or description. An empty description clears it.",
+        "operationId": "MyChannelController_updateMyChannel",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed or empty body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The user has no channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nickname already in use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Edit the authenticated user channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/channels/{nickname}": {
+      "get": {
+        "operationId": "ChannelsController_getChannel",
+        "parameters": [
+          {
+            "name": "nickname",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicChannelResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Public channel page",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
     "/videos": {
       "post": {
         "description": "Creates the video draft and opens a multipart upload in object storage.",
@@ -843,6 +1007,91 @@
         "tags": [
           "videos"
         ]
+      },
+      "patch": {
+        "description": "Updates title, description, category and visibility. Only the informed fields change.",
+        "operationId": "VideosController_updateVideo",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVideoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Video updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed or empty body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video or category not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video upload is still in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Edit a video",
+        "tags": [
+          "videos"
+        ]
       }
     },
     "/videos/{publicId}/stream": {
@@ -958,6 +1207,409 @@
           "videos"
         ]
       }
+    },
+    "/videos/{publicId}/publish": {
+      "post": {
+        "description": "Publishes a ready video that has a category, optionally setting its visibility.",
+        "operationId": "VideosController_publishVideo",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVideoDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Video published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed or the video has no category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found or not owned by the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Video is not ready or is already published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Publish a video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/videos/{publicId}/thumbnail": {
+      "put": {
+        "description": "Accepts a JPEG, PNG or WebP image, resizes it to fit 1280x720 and stores it as JPEG.",
+        "operationId": "VideosController_replaceThumbnail",
+        "parameters": [
+          {
+            "name": "publicId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Thumbnail replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThumbnailResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing file or not a valid JPEG, PNG or WebP image",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Video not found or not owned by the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Upload still in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image above the size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replace the video thumbnail",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/me/videos": {
+      "get": {
+        "description": "Management panel listing with offset pagination, sorting and publication state filter.",
+        "operationId": "MyVideosController_listMyVideos",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "createdAt",
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "publishedAt",
+                "title",
+                "viewCount",
+                "likeCount",
+                "commentCount"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "desc",
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "publicationState",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "uploading",
+                "processing",
+                "error",
+                "unpublished",
+                "published"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyVideosPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Query parameters outside the allowed values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the videos of the authenticated channel",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/channels/{nickname}/videos": {
+      "get": {
+        "description": "Cursor (keyset) pagination, newest first. Unlisted and unpublished videos are never returned.",
+        "operationId": "ChannelVideosController_listChannelVideos",
+        "parameters": [
+          {
+            "name": "nickname",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "Opaque value from `nextCursor`",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 24,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelVideosPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed cursor or limit out of range",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Channel not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the public videos of a channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/categories": {
+      "get": {
+        "description": "Returns every category in display order.",
+        "operationId": "CategoriesController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Categories in display order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoriesResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List video categories",
+        "tags": [
+          "categories"
+        ]
+      }
     }
   },
   "info": {
@@ -1001,6 +1653,73 @@
         "type": "object",
         "properties": {}
       },
+      "ChannelResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "nickname": {
+            "type": "string",
+            "example": "meu_canal"
+          },
+          "name": {
+            "type": "string",
+            "example": "Meu canal"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "nickname",
+          "name",
+          "description",
+          "createdAt"
+        ]
+      },
+      "UpdateChannelDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "PublicChannelResponseDto": {
+        "type": "object",
+        "properties": {
+          "nickname": {
+            "type": "string",
+            "example": "meu_canal"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "videoCount": {
+            "type": "number",
+            "description": "Published and public videos of the channel"
+          }
+        },
+        "required": [
+          "nickname",
+          "name",
+          "description",
+          "createdAt",
+          "videoCount"
+        ]
+      },
       "CreateVideoDto": {
         "type": "object",
         "properties": {}
@@ -1034,6 +1753,188 @@
         "properties": {}
       },
       "PlaybackUrlResponseDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateVideoDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "PublishVideoDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ThumbnailResponseDto": {
+        "type": "object",
+        "properties": {
+          "thumbnailUrl": {
+            "type": "string",
+            "description": "Signed URL of the new thumbnail"
+          }
+        },
+        "required": [
+          "thumbnailUrl"
+        ]
+      },
+      "MyVideoItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Public id of the video"
+          },
+          "title": {
+            "type": "string"
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "rascunho",
+              "processando",
+              "pronto",
+              "erro"
+            ]
+          },
+          "publicationState": {
+            "type": "string",
+            "enum": [
+              "uploading",
+              "processing",
+              "error",
+              "unpublished",
+              "published"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "unlisted"
+            ]
+          },
+          "publishedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "viewCount": {
+            "type": "number"
+          },
+          "likeCount": {
+            "type": "number"
+          },
+          "dislikeCount": {
+            "type": "number"
+          },
+          "commentCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "thumbnailUrl",
+          "status",
+          "publicationState",
+          "visibility",
+          "publishedAt",
+          "createdAt",
+          "viewCount",
+          "likeCount",
+          "dislikeCount",
+          "commentCount"
+        ]
+      },
+      "MyVideosPageDto": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "number"
+          },
+          "pageSize": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number",
+            "description": "Total items after filtering"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MyVideoItemDto"
+            }
+          }
+        },
+        "required": [
+          "page",
+          "pageSize",
+          "total",
+          "items"
+        ]
+      },
+      "ChannelVideoItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Public id of the video"
+          },
+          "title": {
+            "type": "string"
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "durationSeconds": {
+            "type": "number",
+            "nullable": true
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "viewCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "thumbnailUrl",
+          "durationSeconds",
+          "publishedAt",
+          "viewCount"
+        ]
+      },
+      "ChannelVideosPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChannelVideoItemDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "CategoriesResponseDto": {
         "type": "object",
         "properties": {}
       },
