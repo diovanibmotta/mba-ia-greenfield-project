@@ -121,7 +121,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Expõe a lista pública de categorias para a interface preencher a escolha de categoria.
 
 **Route:** GET /categories
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/categories-list.plan.md`
 **Authorization:** Public
 
 **Technical actions:**
@@ -153,7 +153,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Troca o critério "pronto = público" da Fase 03 por "publicado", adiciona `publicationState` e os novos campos às respostas, e ajusta stream e download à mesma regra.
 
 **Route:** GET /videos/:publicId
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-publication-access.plan.md`
 **Authorization:** Public com token opcional (publicado: qualquer pessoa com o link; demais estados: somente o dono)
 
 **Technical actions:**
@@ -191,7 +191,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Permite ao dono editar título, descrição, categoria e visibilidade do vídeo.
 
 **Route:** PATCH /videos/:publicId
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-update.plan.md`
 **Authorization:** Authenticated (somente o dono do vídeo)
 
 **Technical actions:**
@@ -228,7 +228,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Publica o vídeo pronto, opcionalmente definindo a visibilidade no mesmo ato.
 
 **Route:** POST /videos/:publicId/publish
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-publish.plan.md`
 **Authorization:** Authenticated (somente o dono do vídeo)
 
 **Technical actions:**
@@ -265,7 +265,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Recebe a thumbnail customizada, valida e normaliza a imagem com `sharp` e a grava no storage.
 
 **Route:** PUT /videos/:publicId/thumbnail
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-thumbnail.plan.md`
 **Authorization:** Authenticated (somente o dono do vídeo)
 
 **Technical actions:**
@@ -304,7 +304,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Devolve o canal do usuário autenticado, base da edição do canal.
 
 **Route:** GET /me/channel
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/me-channel-get.plan.md`
 **Authorization:** Authenticated
 
 **Technical actions:**
@@ -335,7 +335,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Permite editar nickname, nome e descrição do próprio canal.
 
 **Route:** PATCH /me/channel
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/me-channel-update.plan.md`
 **Authorization:** Authenticated
 
 **Technical actions:**
@@ -373,7 +373,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Lista os vídeos do canal do usuário no painel de gerenciamento, com paginação por offset, ordenação e filtro por estado de publicação.
 
 **Route:** GET /me/videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/me-videos.plan.md`
 **Authorization:** Authenticated
 
 **Technical actions:**
@@ -411,7 +411,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Página pública do canal: informações e quantidade de vídeos públicos.
 
 **Route:** GET /channels/:nickname
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/channels-get.plan.md`
 **Authorization:** Public
 
 **Technical actions:**
@@ -442,7 +442,7 @@ Entregar, no `nestjs-project/`, o backend de gerenciamento de vídeos e canal: c
 **Description:** Lista pública dos vídeos do canal com paginação por cursor, sem expor vídeos unlisted ou não publicados.
 
 **Route:** GET /channels/:nickname/videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/channels-videos.plan.md`
 **Authorization:** Public
 
 **Technical actions:**
