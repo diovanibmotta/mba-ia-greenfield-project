@@ -9,8 +9,10 @@ import {
   UpdateDateColumn,
   ValueTransformer,
 } from 'typeorm';
+import { Category } from '../../categories/entities/category.entity';
 import { Channel } from '../../channels/entities/channel.entity';
 import { VideoStatus } from '../video-status.enum';
+import { VideoVisibility } from '../video-visibility.enum';
 
 // PostgreSQL returns bigint/numeric as strings; sizes stay far below 2^53.
 const numberTransformer: ValueTransformer = {
@@ -23,6 +25,8 @@ const numberTransformer: ValueTransformer = {
 @Index('IDX_videos_public_id', ['public_id'], { unique: true })
 @Index('IDX_videos_channel_id', ['channel_id'])
 @Index('IDX_videos_status', ['status'])
+@Index('IDX_videos_category_id', ['category_id'])
+@Index('IDX_videos_channel_published', ['channel_id', 'published_at', 'id'])
 export class Video {
   @PrimaryGeneratedColumn('uuid', { primaryKeyConstraintName: 'PK_videos' })
   id: string;
@@ -86,6 +90,34 @@ export class Video {
   @Column({ type: 'integer', default: 0 })
   processing_attempts: number;
 
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  category_id: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: VideoVisibility,
+    default: VideoVisibility.PUBLIC,
+  })
+  visibility: VideoVisibility;
+
+  @Column({ type: 'timestamp', nullable: true })
+  published_at: Date | null;
+
+  @Column({ type: 'integer', default: 0 })
+  view_count: number;
+
+  @Column({ type: 'integer', default: 0 })
+  like_count: number;
+
+  @Column({ type: 'integer', default: 0 })
+  dislike_count: number;
+
+  @Column({ type: 'integer', default: 0 })
+  comment_count: number;
+
   @CreateDateColumn()
   created_at: Date;
 
@@ -98,4 +130,14 @@ export class Video {
     foreignKeyConstraintName: 'FK_videos_channel_id',
   })
   channel: Channel;
+
+  @ManyToOne(() => Category, (category) => category.videos, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({
+    name: 'category_id',
+    foreignKeyConstraintName: 'FK_videos_category_id',
+  })
+  category: Category | null;
 }

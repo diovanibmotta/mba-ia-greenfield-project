@@ -13,9 +13,17 @@ import videoConfig from '../config/video.config';
 import { createTestDataSource } from '../test/create-test-data-source';
 import { User } from '../users/entities/user.entity';
 import { Video } from './entities/video.entity';
+import { Category } from '../categories/entities/category.entity';
 import { VideosModule } from './videos.module';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('VideosModule', () => {
   it('should compile successfully', async () => {

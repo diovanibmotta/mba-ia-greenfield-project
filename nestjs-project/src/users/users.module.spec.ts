@@ -5,10 +5,18 @@ import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { createTestDataSource } from '../test/create-test-data-source';
 import { Channel } from '../channels/entities/channel.entity';
 import { Video } from '../videos/entities/video.entity';
+import { Category } from '../categories/entities/category.entity';
 import { User } from './entities/user.entity';
 import { UsersModule } from './users.module';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('UsersModule', () => {
   it('should compile successfully', async () => {

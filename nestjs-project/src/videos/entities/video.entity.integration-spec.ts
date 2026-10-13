@@ -9,9 +9,18 @@ import {
 import { User } from '../../users/entities/user.entity';
 import { generatePublicId } from '../public-id.util';
 import { VideoStatus } from '../video-status.enum';
+import { VideoVisibility } from '../video-visibility.enum';
 import { Video } from './video.entity';
+import { Category } from '../../categories/entities/category.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('Video entity (integration)', () => {
   let dataSource: DataSource;
@@ -111,5 +120,85 @@ describe('Video entity (integration)', () => {
     expect(found.declared_size).toBe(10737418240);
     expect(found.size_bytes).toBe(10737418240);
     expect(found.duration_seconds).toBe(125.5);
+  });
+
+  describe('management columns', () => {
+    let categoryRepository: Repository<Category>;
+
+    beforeAll(() => {
+      categoryRepository = dataSource.getRepository(Category);
+    });
+
+    afterEach(async () => {
+      await dataSource.query('DELETE FROM "videos"');
+      await categoryRepository.delete({ slug: 'video-entity-test' });
+    });
+
+    it('should default visibility to public, published_at to null and counters to 0', async () => {
+      const saved = await videoRepository.save(buildVideo());
+
+      const found = await videoRepository.findOneByOrFail({ id: saved.id });
+      expect(found.visibility).toBe(VideoVisibility.PUBLIC);
+      expect(found.published_at).toBeNull();
+      expect(found.description).toBeNull();
+      expect(found.category_id).toBeNull();
+      expect([
+        found.view_count,
+        found.like_count,
+        found.dislike_count,
+        found.comment_count,
+      ]).toEqual([0, 0, 0, 0]);
+    });
+
+    it('should reject a visibility outside the enum', async () => {
+      await expect(
+        videoRepository.save(
+          buildVideo({ visibility: 'private' as unknown as VideoVisibility }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('should enforce the category foreign key', async () => {
+      await expect(
+        videoRepository.save(
+          buildVideo({ category_id: '00000000-0000-4000-8000-000000000000' }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('should link a video to an existing category', async () => {
+      const category = await categoryRepository.save(
+        categoryRepository.create({
+          slug: 'video-entity-test',
+          name: 'Video entity test',
+          sort_order: 99,
+        }),
+      );
+
+      const saved = await videoRepository.save(
+        buildVideo({ category_id: category.id }),
+      );
+
+      const found = await videoRepository.findOneOrFail({
+        where: { id: saved.id },
+        relations: { category: true },
+      });
+      expect(found.category?.slug).toBe('video-entity-test');
+    });
+
+    it('should restrict deleting a category that still has videos', async () => {
+      const category = await categoryRepository.save(
+        categoryRepository.create({
+          slug: 'video-entity-test',
+          name: 'Video entity test',
+          sort_order: 99,
+        }),
+      );
+      await videoRepository.save(buildVideo({ category_id: category.id }));
+
+      await expect(
+        categoryRepository.delete({ id: category.id }),
+      ).rejects.toThrow();
+    });
   });
 });

@@ -13,6 +13,7 @@ import { VideoQueueModule } from './queue/video-queue.module';
 import { StorageModule } from './storage/storage.module';
 import { User } from './users/entities/user.entity';
 import { Video } from './videos/entities/video.entity';
+import { Category } from './categories/entities/category.entity';
 import { ThumbnailService } from './worker/thumbnail.service';
 import { VideoProbeService } from './worker/video-probe.service';
 import { VideoProcessingProcessor } from './worker/video-processing.processor';
@@ -34,7 +35,7 @@ import { VideoProcessingProcessor } from './worker/video-processing.processor';
     }),
     typeOrmRoot,
     // Video references Channel, which references User: all three must be registered.
-    TypeOrmModule.forFeature([Video, Channel, User]),
+    TypeOrmModule.forFeature([Video, Category, Channel, User]),
     StorageModule,
     VideoQueueModule,
   ],

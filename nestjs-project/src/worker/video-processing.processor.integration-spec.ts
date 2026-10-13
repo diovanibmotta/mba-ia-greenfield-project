@@ -29,12 +29,20 @@ import { createNonMedia } from '../test/media-fixtures';
 import { createUserWithChannel } from '../test/video-fixtures';
 import { User } from '../users/entities/user.entity';
 import { Video } from '../videos/entities/video.entity';
+import { Category } from '../categories/entities/category.entity';
 import { VideoStatus } from '../videos/video-status.enum';
 import { ThumbnailService } from './thumbnail.service';
 import { VideoProbeService } from './video-probe.service';
 import { VideoProcessingProcessor } from './video-processing.processor';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 async function waitFor<T>(
   read: () => Promise<T>,
@@ -69,7 +77,7 @@ describe('VideoProcessingProcessor (integration)', () => {
           load: [queueConfig, storageConfig, videoConfig],
         }),
         TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES).options),
-        TypeOrmModule.forFeature([Video, Channel, User]),
+        TypeOrmModule.forFeature([Video, Category, Channel, User]),
         StorageModule,
         VideoQueueModule,
       ],

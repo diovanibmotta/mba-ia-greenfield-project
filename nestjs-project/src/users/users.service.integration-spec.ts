@@ -3,6 +3,7 @@ import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import { Video } from '../videos/entities/video.entity';
+import { Category } from '../categories/entities/category.entity';
 import { ChannelsService } from '../channels/channels.service';
 import {
   cleanAllTables,
@@ -11,7 +12,14 @@ import {
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('UsersService (integration)', () => {
   let dataSource: DataSource;

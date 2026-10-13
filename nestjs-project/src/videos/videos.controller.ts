@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
 } from '@nestjs/common';
 import {
@@ -26,6 +27,8 @@ import { CreateVideoResponseDto } from './dto/create-video-response.dto';
 import { PartUrlsDto } from './dto/part-urls.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { PlaybackUrlResponseDto } from './dto/playback-url-response.dto';
+import { PublishVideoDto } from './dto/publish-video.dto';
+import { UpdateVideoDto } from './dto/update-video.dto';
 import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { VideoResponseDto } from './dto/video-response.dto';
 import { VideosService } from './videos.service';
@@ -292,5 +295,84 @@ export class VideosController {
     return this.videosService.getPlaybackUrl(publicId, user?.sub, {
       download: true,
     });
+  }
+
+  @Patch(':publicId')
+  @ApiOperation({
+    summary: 'Edit a video',
+    description:
+      'Updates title, description, category and visibility. Only the informed fields change.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Video updated',
+    type: VideoResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed or empty body',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video or category not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video upload is still in progress',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  updateVideo(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: UpdateVideoDto,
+  ): Promise<VideoResponseDto> {
+    return this.videosService.updateVideo(user.sub, publicId, dto);
+  }
+
+  @Post(':publicId/publish')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Publish a video',
+    description:
+      'Publishes a ready video that has a category, optionally setting its visibility.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Video published',
+    type: VideoResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed or the video has no category',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found or not owned by the caller',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video is not ready or is already published',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  publishVideo(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+    @Body() dto: PublishVideoDto,
+  ): Promise<VideoResponseDto> {
+    return this.videosService.publishVideo(user.sub, publicId, dto);
   }
 }

@@ -7,6 +7,15 @@ import {
   InvalidTokenException,
   TokenExpiredException,
   TokenReuseDetectedException,
+  CategoryNotFoundException,
+  CategoryRequiredException,
+  ChannelNotFoundException,
+  InvalidCursorException,
+  InvalidThumbnailException,
+  NicknameAlreadyExistsException,
+  ThumbnailTooLargeException,
+  VideoAlreadyPublishedException,
+  VideoUploadInProgressException,
 } from '../exceptions/domain.exception';
 
 describe('DomainExceptionFilter', () => {
@@ -93,6 +102,27 @@ describe('DomainExceptionFilter', () => {
     expect(mockJson).toHaveBeenCalledWith({
       statusCode: 401,
       error: 'TOKEN_REUSE_DETECTED',
+      message: expect.any(String) as string,
+    });
+  });
+
+  it.each([
+    [new CategoryNotFoundException(), 404, 'CATEGORY_NOT_FOUND'],
+    [new CategoryRequiredException(), 400, 'CATEGORY_REQUIRED'],
+    [new VideoUploadInProgressException(), 409, 'VIDEO_UPLOAD_IN_PROGRESS'],
+    [new VideoAlreadyPublishedException(), 409, 'VIDEO_ALREADY_PUBLISHED'],
+    [new InvalidThumbnailException(), 400, 'INVALID_THUMBNAIL'],
+    [new ThumbnailTooLargeException(), 413, 'THUMBNAIL_TOO_LARGE'],
+    [new NicknameAlreadyExistsException(), 409, 'NICKNAME_ALREADY_EXISTS'],
+    [new ChannelNotFoundException(), 404, 'CHANNEL_NOT_FOUND'],
+    [new InvalidCursorException(), 400, 'INVALID_CURSOR'],
+  ])('maps %s to its status and error code', (exception, status, code) => {
+    filter.catch(exception, mockHost);
+
+    expect(mockStatus).toHaveBeenCalledWith(status);
+    expect(mockJson).toHaveBeenCalledWith({
+      statusCode: status,
+      error: code,
       message: expect.any(String) as string,
     });
   });

@@ -112,3 +112,61 @@ export class VideoNotReadyException extends DomainException {
     super('VIDEO_NOT_READY', 409, 'Video is not ready');
   }
 }
+
+export class CategoryNotFoundException extends DomainException {
+  constructor() {
+    super('CATEGORY_NOT_FOUND', 404, 'Category not found');
+  }
+}
+
+export class CategoryRequiredException extends DomainException {
+  constructor() {
+    super('CATEGORY_REQUIRED', 400, 'Category is required to publish');
+  }
+}
+
+export class VideoUploadInProgressException extends DomainException {
+  constructor() {
+    super('VIDEO_UPLOAD_IN_PROGRESS', 409, 'Video upload is still in progress');
+  }
+}
+
+export class VideoAlreadyPublishedException extends DomainException {
+  constructor() {
+    super('VIDEO_ALREADY_PUBLISHED', 409, 'Video is already published');
+  }
+}
+
+export class InvalidThumbnailException extends DomainException {
+  constructor() {
+    super(
+      'INVALID_THUMBNAIL',
+      400,
+      'Thumbnail must be a valid JPEG, PNG or WebP image',
+    );
+  }
+}
+
+export class ThumbnailTooLargeException extends DomainException {
+  constructor() {
+    super('THUMBNAIL_TOO_LARGE', 413, 'Thumbnail exceeds the 2 MiB limit');
+  }
+}
+
+export class NicknameAlreadyExistsException extends DomainException {
+  constructor() {
+    super('NICKNAME_ALREADY_EXISTS', 409, 'Nickname is already in use');
+  }
+}
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found');
+  }
+}
+
+export class InvalidCursorException extends DomainException {
+  constructor() {
+    super('INVALID_CURSOR', 400, 'Cursor is invalid');
+  }
+}

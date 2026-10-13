@@ -5,13 +5,14 @@ import { ChannelsModule } from '../channels/channels.module';
 import { VideoQueueModule } from '../queue/video-queue.module';
 import { StorageModule } from '../storage/storage.module';
 import { Video } from './entities/video.entity';
+import { Category } from '../categories/entities/category.entity';
 import { VideosController } from './videos.controller';
 import { VideosService } from './videos.service';
 
 @Module({
   imports: [
     AuthModule,
-    TypeOrmModule.forFeature([Video]),
+    TypeOrmModule.forFeature([Video, Category]),
     ChannelsModule,
     StorageModule,
     VideoQueueModule,

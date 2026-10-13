@@ -25,11 +25,20 @@ import {
 import { createUserWithChannel } from '../test/video-fixtures';
 import { User } from '../users/entities/user.entity';
 import { Video } from './entities/video.entity';
+import { Category } from '../categories/entities/category.entity';
 import { VideoStatus } from './video-status.enum';
+import { VideoVisibility } from './video-visibility.enum';
 import { VideosModule } from './videos.module';
 import { VideosService } from './videos.service';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
+const ALL_ENTITIES = [
+  User,
+  Channel,
+  RefreshToken,
+  VerificationToken,
+  Video,
+  Category,
+];
 
 describe('VideosService (integration)', () => {
   let moduleRef: TestingModule;
@@ -303,7 +312,7 @@ describe('VideosService (integration)', () => {
       );
     }
 
-    it('should return a ready video with a working thumbnail URL', async () => {
+    it('should return a published video with category, counters and a working thumbnail URL', async () => {
       const { channel } = await createUserWithChannel(dataSource);
       const key = `videos/${Date.now()}/thumbnail.jpg`;
       await storage.putObject(
@@ -311,10 +320,17 @@ describe('VideosService (integration)', () => {
         Buffer.from([0xff, 0xd8, 0xff]),
         'image/jpeg',
       );
+      const category = await dataSource
+        .getRepository(Category)
+        .findOneByOrFail({ slug: 'educacao' });
       const video = await insertVideo(channel.id, {
         status: VideoStatus.READY,
         duration_seconds: 12.5,
         thumbnail_key: key,
+        category_id: category.id,
+        description: 'Descrição',
+        visibility: VideoVisibility.UNLISTED,
+        published_at: new Date(),
       });
 
       const result = await service.getVideo(video.public_id);
@@ -322,30 +338,48 @@ describe('VideosService (integration)', () => {
       expect(result).toMatchObject({
         id: video.public_id,
         status: VideoStatus.READY,
+        publicationState: 'published',
+        visibility: 'unlisted',
+        description: 'Descrição',
+        category: { slug: 'educacao', name: 'Educação' },
         durationSeconds: 12.5,
+        viewCount: 0,
+        likeCount: 0,
+        dislikeCount: 0,
+        commentCount: 0,
       });
+      expect(result.publishedAt).toEqual(expect.any(String));
       const thumbnail = await fetch(result.thumbnailUrl!);
       expect(thumbnail.status).toBe(200);
     });
 
-    it('should apply the visibility rule against persisted channels', async () => {
+    it('should apply the access rule against persisted channels', async () => {
       const { user, channel } = await createUserWithChannel(dataSource);
       const { user: other } = await createUserWithChannel(dataSource);
-      const video = await insertVideo(channel.id, {
+      const unpublished = await insertVideo(channel.id, {
+        status: VideoStatus.READY,
+        published_at: null,
+      });
+      const failed = await insertVideo(channel.id, {
         status: VideoStatus.ERROR,
         error_reason: 'INVALID_MEDIA',
       });
 
-      await expect(service.getVideo(video.public_id)).rejects.toMatchObject({
-        errorCode: 'VIDEO_NOT_FOUND',
-      });
+      for (const video of [unpublished, failed]) {
+        await expect(service.getVideo(video.public_id)).rejects.toMatchObject({
+          errorCode: 'VIDEO_NOT_FOUND',
+        });
+        await expect(
+          service.getVideo(video.public_id, other.id),
+        ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+      }
       await expect(
-        service.getVideo(video.public_id, other.id),
-      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+        service.getVideo(unpublished.public_id, user.id),
+      ).resolves.toMatchObject({ publicationState: 'unpublished' });
       await expect(
-        service.getVideo(video.public_id, user.id),
+        service.getVideo(failed.public_id, user.id),
       ).resolves.toMatchObject({
-        status: VideoStatus.ERROR,
+        publicationState: 'error',
         errorReason: 'INVALID_MEDIA',
       });
     });
@@ -354,7 +388,10 @@ describe('VideosService (integration)', () => {
   describe('getPlaybackUrl', () => {
     const OBJECT_SIZE = 4096;
 
-    async function readyVideo(fileName = 'aula.mp4'): Promise<Video> {
+    async function readyVideo(
+      fileName = 'aula.mp4',
+      overrides: Partial<Video> = {},
+    ): Promise<Video> {
       const { channel } = await createUserWithChannel(dataSource);
       const id = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
       const key = `videos/${id}/original.mp4`;
@@ -366,11 +403,13 @@ describe('VideosService (integration)', () => {
           channel_id: channel.id,
           title: 'Aula',
           status: VideoStatus.READY,
+          published_at: new Date(),
           file_name: fileName,
           content_type: 'video/mp4',
           declared_size: OBJECT_SIZE,
           size_bytes: OBJECT_SIZE,
           storage_key: key,
+          ...overrides,
         }),
       );
     }
@@ -389,6 +428,32 @@ describe('VideosService (integration)', () => {
       expect(response.status).toBe(206);
       expect((await response.arrayBuffer()).byteLength).toBe(100);
       expect(response.headers.get('content-disposition')).toBeNull();
+    });
+
+    it('should issue a streaming URL for an unlisted published video', async () => {
+      const video = await readyVideo('aula.mp4', {
+        visibility: VideoVisibility.UNLISTED,
+      });
+
+      await expect(
+        service.getPlaybackUrl(video.public_id, undefined, { download: false }),
+      ).resolves.toHaveProperty('url');
+    });
+
+    it('should hide an unpublished ready video from anonymous callers but not from its owner', async () => {
+      const video = await readyVideo('aula.mp4', { published_at: null });
+      const owner = await dataSource
+        .getRepository(Channel)
+        .findOneByOrFail({ id: video.channel_id });
+
+      await expect(
+        service.getPlaybackUrl(video.public_id, undefined, { download: false }),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+      await expect(
+        service.getPlaybackUrl(video.public_id, owner.user_id, {
+          download: false,
+        }),
+      ).resolves.toHaveProperty('url');
     });
 
     it('should issue a download URL with an attachment disposition and the full body', async () => {
@@ -417,6 +482,169 @@ describe('VideosService (integration)', () => {
       expect(response.headers.get('content-disposition')).toBe(
         'attachment; filename="a_b.mp4"',
       );
+    });
+  });
+
+  describe('updateVideo', () => {
+    async function insertOwned(userId: string, overrides: Partial<Video> = {}) {
+      const channel = await dataSource
+        .getRepository(Channel)
+        .findOneByOrFail({ user_id: userId });
+      const repository = dataSource.getRepository(Video);
+      return repository.save(
+        repository.create({
+          public_id: Math.random().toString(36).slice(2, 13).padEnd(11, 'x'),
+          channel_id: channel.id,
+          title: 'Aula',
+          status: VideoStatus.READY,
+          file_name: 'aula.mp4',
+          content_type: 'video/mp4',
+          declared_size: 1000,
+          storage_key: 'videos/some/original.mp4',
+          ...overrides,
+        }),
+      );
+    }
+
+    it('should persist title, description, category and visibility', async () => {
+      const { user } = await createUserWithChannel(dataSource);
+      const video = await insertOwned(user.id);
+      const category = await dataSource
+        .getRepository(Category)
+        .findOneByOrFail({ slug: 'tecnologia' });
+
+      const result = await service.updateVideo(user.id, video.public_id, {
+        title: 'Novo título',
+        description: 'Nova descrição',
+        categoryId: category.id,
+        visibility: VideoVisibility.UNLISTED,
+      });
+
+      expect(result).toMatchObject({
+        title: 'Novo título',
+        description: 'Nova descrição',
+        visibility: 'unlisted',
+        category: { slug: 'tecnologia' },
+      });
+      const row = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ id: video.id });
+      expect(row.category_id).toBe(category.id);
+      expect(row.title).toBe('Novo título');
+    });
+
+    it('should reject an unknown category and leave the video unchanged', async () => {
+      const { user } = await createUserWithChannel(dataSource);
+      const video = await insertOwned(user.id);
+
+      await expect(
+        service.updateVideo(user.id, video.public_id, {
+          title: 'Mudou',
+          categoryId: '00000000-0000-4000-8000-000000000000',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'CATEGORY_NOT_FOUND' });
+
+      const row = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ id: video.id });
+      expect(row.title).toBe('Aula');
+    });
+
+    it('should not let another user edit the video', async () => {
+      const { user } = await createUserWithChannel(dataSource);
+      const { user: other } = await createUserWithChannel(dataSource);
+      const video = await insertOwned(user.id);
+
+      await expect(
+        service.updateVideo(other.id, video.public_id, { title: 'x' }),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_FOUND' });
+    });
+
+    it('should block edits while the upload is open', async () => {
+      const { user } = await createUserWithChannel(dataSource);
+      const video = await insertOwned(user.id, {
+        status: VideoStatus.DRAFT,
+        upload_id: 'upload-1',
+      });
+
+      await expect(
+        service.updateVideo(user.id, video.public_id, { title: 'x' }),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_UPLOAD_IN_PROGRESS' });
+    });
+  });
+
+  describe('publishVideo', () => {
+    async function readyDraftForPublish(
+      userId: string,
+      overrides: Partial<Video> = {},
+    ) {
+      const channel = await dataSource
+        .getRepository(Channel)
+        .findOneByOrFail({ user_id: userId });
+      const category = await dataSource
+        .getRepository(Category)
+        .findOneByOrFail({ slug: 'jogos' });
+      const repository = dataSource.getRepository(Video);
+      return repository.save(
+        repository.create({
+          public_id: Math.random().toString(36).slice(2, 13).padEnd(11, 'x'),
+          channel_id: channel.id,
+          category_id: category.id,
+          title: 'Aula',
+          status: VideoStatus.READY,
+          file_name: 'aula.mp4',
+          content_type: 'video/mp4',
+          declared_size: 1000,
+          storage_key: 'videos/some/original.mp4',
+          ...overrides,
+        }),
+      );
+    }
+
+    it('should persist published_at and make the video reachable by anonymous callers', async () => {
+      const { user } = await createUserWithChannel(dataSource);
+      const video = await readyDraftForPublish(user.id);
+      await expect(service.getVideo(video.public_id)).rejects.toMatchObject({
+        errorCode: 'VIDEO_NOT_FOUND',
+      });
+
+      const result = await service.publishVideo(user.id, video.public_id, {
+        visibility: VideoVisibility.UNLISTED,
+      });
+
+      expect(result).toMatchObject({
+        publicationState: 'published',
+        visibility: 'unlisted',
+      });
+      const row = await dataSource
+        .getRepository(Video)
+        .findOneByOrFail({ id: video.id });
+      expect(row.published_at).toBeInstanceOf(Date);
+      await expect(service.getVideo(video.public_id)).resolves.toMatchObject({
+        id: video.public_id,
+      });
+    });
+
+    it('should not publish twice, without category, or while not ready', async () => {
+      const { user } = await createUserWithChannel(dataSource);
+      const published = await readyDraftForPublish(user.id);
+      await service.publishVideo(user.id, published.public_id, {});
+      const noCategory = await readyDraftForPublish(user.id, {
+        category_id: null,
+      });
+      const processing = await readyDraftForPublish(user.id, {
+        status: VideoStatus.PROCESSING,
+      });
+
+      await expect(
+        service.publishVideo(user.id, published.public_id, {}),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_ALREADY_PUBLISHED' });
+      await expect(
+        service.publishVideo(user.id, noCategory.public_id, {}),
+      ).rejects.toMatchObject({ errorCode: 'CATEGORY_REQUIRED' });
+      await expect(
+        service.publishVideo(user.id, processing.public_id, {}),
+      ).rejects.toMatchObject({ errorCode: 'VIDEO_NOT_READY' });
     });
   });
 });
