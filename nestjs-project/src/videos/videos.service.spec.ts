@@ -13,6 +13,7 @@ import {
   VideoNotFoundException,
   VideoNotReadyException,
   CategoryNotFoundException,
+  ChannelNotFoundException,
   InvalidThumbnailException,
   CategoryRequiredException,
   VideoAlreadyPublishedException,
@@ -23,6 +24,8 @@ import { StorageService } from '../storage/storage.service';
 import { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
 import { VideoVisibility } from './video-visibility.enum';
+import { MyVideosSort, SortOrder } from './dto/list-my-videos-query.dto';
+import { PublicationState } from './publication-state.util';
 import { ThumbnailImageService } from './thumbnail-image.service';
 import { VideosService } from './videos.service';
 
@@ -61,6 +64,7 @@ describe('VideosService', () => {
     findOneBy: jest.Mock;
     findOne: jest.Mock;
     findOneOrFail: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let categories: { existsBy: jest.Mock };
   let channels: { findOneByOrFail: jest.Mock; findOneBy: jest.Mock };
@@ -86,6 +90,7 @@ describe('VideosService', () => {
       findOneBy: jest.fn(),
       findOne: jest.fn(),
       findOneOrFail: jest.fn(),
+      createQueryBuilder: jest.fn(),
     };
     categories = { existsBy: jest.fn().mockResolvedValue(true) };
     channels = {
@@ -1173,6 +1178,134 @@ describe('VideosService', () => {
       await expect(
         service.replaceThumbnail('other-user', 'AAAAAAAAAAA', file),
       ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('listMyVideos', () => {
+    function makeQb(result: [unknown[], number]) {
+      const qb: Record<string, jest.Mock> = {};
+      for (const name of [
+        'where',
+        'andWhere',
+        'orderBy',
+        'addOrderBy',
+        'skip',
+        'take',
+      ]) {
+        qb[name] = jest.fn().mockReturnValue(qb);
+      }
+      qb.getManyAndCount = jest.fn().mockResolvedValue(result);
+      return qb;
+    }
+
+    const row = (overrides: Record<string, unknown> = {}) => ({
+      public_id: 'AAAAAAAAAAA',
+      title: 'Aula',
+      thumbnail_key: null,
+      status: VideoStatus.READY,
+      visibility: VideoVisibility.PUBLIC,
+      published_at: null,
+      created_at: new Date('2026-10-13T10:00:00.000Z'),
+      view_count: 1,
+      like_count: 2,
+      dislike_count: 3,
+      comment_count: 4,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      channels.findOneBy.mockResolvedValue({ id: 'channel-1' });
+    });
+
+    it.each([
+      ['uploading', [{ status: VideoStatus.DRAFT }], false],
+      ['processing', [{ status: VideoStatus.PROCESSING }], false],
+      ['error', [{ status: VideoStatus.ERROR }], false],
+      ['unpublished', [{ status: VideoStatus.READY }], 'IS NULL'],
+      ['published', [{ status: VideoStatus.READY }], 'IS NOT NULL'],
+    ])(
+      'should map publicationState %s to status/published_at conditions',
+      async (state, [status], publishedAtCondition) => {
+        const qb = makeQb([[], 0]);
+        videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+        await service.listMyVideos('user-1', {
+          page: 1,
+          pageSize: 20,
+          sort: MyVideosSort.CREATED_AT,
+          order: SortOrder.DESC,
+          publicationState: state as PublicationState,
+        });
+
+        expect(qb.andWhere).toHaveBeenCalledWith(
+          'video.status = :status',
+          status,
+        );
+        if (publishedAtCondition) {
+          expect(qb.andWhere).toHaveBeenCalledWith(
+            `video.published_at ${publishedAtCondition}`,
+          );
+        }
+      },
+    );
+
+    it('should order by the whitelisted column and paginate with skip/take', async () => {
+      const qb = makeQb([[], 0]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.listMyVideos('user-1', {
+        page: 3,
+        pageSize: 10,
+        sort: MyVideosSort.VIEW_COUNT,
+        order: SortOrder.ASC,
+      });
+
+      expect(qb.orderBy).toHaveBeenCalledWith(
+        'video.view_count',
+        'ASC',
+        'NULLS LAST',
+      );
+      expect(qb.skip).toHaveBeenCalledWith(20);
+      expect(qb.take).toHaveBeenCalledWith(10);
+    });
+
+    it('should build the page with derived state and signed thumbnail', async () => {
+      const qb = makeQb([
+        [row({ thumbnail_key: 'videos/x/thumbnail.jpg' }), row()],
+        7,
+      ]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+      storage.presignGetObject.mockResolvedValue('https://signed');
+
+      const page = await service.listMyVideos('user-1', {
+        page: 1,
+        pageSize: 20,
+        sort: MyVideosSort.CREATED_AT,
+        order: SortOrder.DESC,
+      });
+
+      expect(page).toMatchObject({ page: 1, pageSize: 20, total: 7 });
+      expect(page.items[0]).toMatchObject({
+        id: 'AAAAAAAAAAA',
+        thumbnailUrl: 'https://signed',
+        publicationState: 'unpublished',
+        viewCount: 1,
+        dislikeCount: 3,
+      });
+      expect(page.items[1].thumbnailUrl).toBeNull();
+    });
+
+    it('should fail when the user has no channel', async () => {
+      channels.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.listMyVideos('user-1', {
+          page: 1,
+          pageSize: 20,
+          sort: MyVideosSort.CREATED_AT,
+          order: SortOrder.DESC,
+        }),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
     });
   });
 });

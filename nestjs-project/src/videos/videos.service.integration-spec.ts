@@ -18,6 +18,8 @@ import {
   VIDEO_PROCESS_JOB,
   VIDEO_PROCESSING_QUEUE,
 } from '../queue/queue.constants';
+import { MyVideosSort, SortOrder } from './dto/list-my-videos-query.dto';
+import { PublicationState } from './publication-state.util';
 import { StorageService } from '../storage/storage.service';
 import {
   cleanAllTables,
@@ -688,6 +690,95 @@ describe('VideosService (integration)', () => {
         Buffer.from(await response.arrayBuffer()),
       ).metadata();
       expect(meta).toMatchObject({ format: 'jpeg', width: 960, height: 720 });
+    });
+  });
+
+  describe('listMyVideos', () => {
+    let seedRun = 0;
+    async function seed(count: number) {
+      const run = String(++seedRun);
+      const { user, channel } = await createUserWithChannel(dataSource);
+      const repository = dataSource.getRepository(Video);
+      for (let i = 0; i < count; i++) {
+        await repository.save(
+          repository.create({
+            public_id: `LIST${run}VID${String(i).padStart(3, '0')}`,
+            channel_id: channel.id,
+            title: `Video ${i}`,
+            status: VideoStatus.READY,
+            published_at: i % 2 === 0 ? new Date() : null,
+            view_count: 10 - i,
+            file_name: 'a.mp4',
+            content_type: 'video/mp4',
+            declared_size: 1000,
+            storage_key: `videos/${run}-${i}/original.mp4`,
+            created_at: new Date(2026, 9, 1 + i),
+          }),
+        );
+      }
+      return user;
+    }
+
+    const base = {
+      page: 1,
+      pageSize: 20,
+      sort: MyVideosSort.CREATED_AT,
+      order: SortOrder.DESC,
+    };
+
+    it('should paginate, report the total and order by created_at desc', async () => {
+      const user = await seed(5);
+
+      const first = await service.listMyVideos(user.id, {
+        ...base,
+        pageSize: 2,
+      });
+      const last = await service.listMyVideos(user.id, {
+        ...base,
+        pageSize: 2,
+        page: 3,
+      });
+
+      expect(first.total).toBe(5);
+      expect(first.items.map((i) => i.title)).toEqual(['Video 4', 'Video 3']);
+      expect(last.items.map((i) => i.title)).toEqual(['Video 0']);
+    });
+
+    it('should sort by a counter ascending', async () => {
+      const user = await seed(3);
+
+      const page = await service.listMyVideos(user.id, {
+        ...base,
+        sort: MyVideosSort.VIEW_COUNT,
+        order: SortOrder.ASC,
+      });
+
+      expect(page.items.map((i) => i.viewCount)).toEqual([8, 9, 10]);
+    });
+
+    it('should filter by publication state', async () => {
+      const user = await seed(5);
+
+      const unpublished = await service.listMyVideos(user.id, {
+        ...base,
+        publicationState: PublicationState.UNPUBLISHED,
+      });
+      const published = await service.listMyVideos(user.id, {
+        ...base,
+        publicationState: PublicationState.PUBLISHED,
+      });
+
+      expect(unpublished.total).toBe(2);
+      expect(published.total).toBe(3);
+    });
+
+    it('should only return videos of the caller channel', async () => {
+      const mine = await seed(2);
+      await seed(3);
+
+      const page = await service.listMyVideos(mine.id, base);
+
+      expect(page.total).toBe(2);
     });
   });
 });

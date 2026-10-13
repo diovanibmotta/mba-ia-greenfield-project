@@ -1,7 +1,7 @@
 # phase-04-gerenciamento — Progress
 
 **Status:** in_progress
-**SIs:** 10/13 completed
+**SIs:** 11/13 completed
 
 ### SI-04.1 — Infra: sharp, tipos do Multer, configuração de thumbnail e exceções de domínio
 - **Status:** completed
@@ -91,9 +91,12 @@ Empty body -> BadRequestException (same pattern as updateVideo); same nickname i
 src/auth/auth.service.integration-spec.ts beforeAll can exceed 5s default timeout on cold ts-jest cache in container (passes with --testTimeout=60000); not a regression.
 
 ### SI-04.11 — Endpoint GET /me/videos
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 119 passing (videos.service) + 8 e2e
+- **Observations:**
+Added PageQueryDto/page-response in src/common/pagination; MyVideosController registered in VideosModule.
+Sort uses a whitelist map to columns with NULLS LAST and id tiebreaker; publicationState mapped to status/published_at conditions.
+Unit spec mocks the QueryBuilder chain (createQueryBuilder added to videos mock).
 
 ### SI-04.12 — Endpoint GET /channels/:nickname
 - **Status:** pending
