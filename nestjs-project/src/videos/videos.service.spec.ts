@@ -1,5 +1,7 @@
+import { BadRequestException } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import { QueryFailedError, Repository } from 'typeorm';
+import { Category } from '../categories/entities/category.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import {
   FileTooLargeException,
@@ -10,17 +12,32 @@ import {
   UploadSizeMismatchException,
   VideoNotFoundException,
   VideoNotReadyException,
+  CategoryNotFoundException,
+  InvalidCursorException,
+  ChannelNotFoundException,
+  InvalidThumbnailException,
+  CategoryRequiredException,
+  VideoAlreadyPublishedException,
+  VideoUploadInProgressException,
 } from '../common/exceptions/domain.exception';
 import type { VideoProcessJobData } from '../queue/queue.constants';
 import { StorageService } from '../storage/storage.service';
 import { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
+import { VideoVisibility } from './video-visibility.enum';
+import { MyVideosSort, SortOrder } from './dto/list-my-videos-query.dto';
+import { decodeCursor, encodeCursor } from '../common/pagination/cursor.util';
+import { PublicationState } from './publication-state.util';
+import { ThumbnailImageService } from './thumbnail-image.service';
 import { VideosService } from './videos.service';
 
 const config = {
   maxSizeBytes: 10737418240,
   partSizeBytes: 16777216,
   uploadAbandonDays: 1,
+  thumbnailMaxBytes: 2097152,
+  thumbnailMaxWidth: 1280,
+  thumbnailMaxHeight: 720,
 };
 
 const queueSettings = {
@@ -40,15 +57,21 @@ function uniqueViolation(): QueryFailedError {
 }
 
 describe('VideosService', () => {
+  let thumbnails: { normalize: jest.Mock };
   let videos: {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
     delete: jest.Mock;
     findOneBy: jest.Mock;
+    findOne: jest.Mock;
+    findOneOrFail: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
+  let categories: { existsBy: jest.Mock };
   let channels: { findOneByOrFail: jest.Mock; findOneBy: jest.Mock };
   let storage: {
+    putObject: jest.Mock;
     createMultipartUpload: jest.Mock;
     presignUploadPart: jest.Mock;
     listParts: jest.Mock;
@@ -67,12 +90,17 @@ describe('VideosService', () => {
       update: jest.fn().mockResolvedValue(undefined),
       delete: jest.fn().mockResolvedValue(undefined),
       findOneBy: jest.fn(),
+      findOne: jest.fn(),
+      findOneOrFail: jest.fn(),
+      createQueryBuilder: jest.fn(),
     };
+    categories = { existsBy: jest.fn().mockResolvedValue(true) };
     channels = {
       findOneByOrFail: jest.fn().mockResolvedValue({ id: 'channel-1' }),
       findOneBy: jest.fn().mockResolvedValue({ id: 'channel-1' }),
     };
     storage = {
+      putObject: jest.fn().mockResolvedValue(undefined),
       createMultipartUpload: jest.fn().mockResolvedValue('upload-1'),
       presignUploadPart: jest
         .fn()
@@ -86,6 +114,9 @@ describe('VideosService', () => {
       abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
     };
     queue = { add: jest.fn().mockResolvedValue({ id: 'job-1' }) };
+    thumbnails = {
+      normalize: jest.fn().mockResolvedValue(Buffer.from('jpeg')),
+    };
     service = new VideosService(
       videos as unknown as Repository<Video>,
       channels as unknown as Repository<Channel>,
@@ -93,6 +124,8 @@ describe('VideosService', () => {
       config,
       queue as unknown as Queue<VideoProcessJobData>,
       queueSettings,
+      categories as unknown as Repository<Category>,
+      thumbnails as unknown as ThumbnailImageService,
     );
   });
 
@@ -488,6 +521,8 @@ describe('VideosService', () => {
         { ...config, maxSizeBytes: 1000 },
         queue as unknown as Queue<VideoProcessJobData>,
         queueSettings,
+        categories as unknown as Repository<Category>,
+        thumbnails as unknown as ThumbnailImageService,
       );
 
       await expect(
@@ -595,60 +630,91 @@ describe('VideosService', () => {
   });
 
   describe('getVideo', () => {
+    const PUBLISHED_AT = new Date('2026-10-13T12:00:00.000Z');
     const base = {
       id: 'video-1',
       public_id: 'AAAAAAAAAAA',
       channel_id: 'channel-1',
       title: 'Aula',
+      description: 'Descrição',
       status: VideoStatus.READY,
+      visibility: VideoVisibility.PUBLIC,
+      published_at: PUBLISHED_AT,
       duration_seconds: 125.5,
       thumbnail_key: 'videos/video-1/thumbnail.jpg',
       error_reason: null,
-      created_at: new Date('2026-10-13T12:00:00.000Z'),
-    } as Video;
+      view_count: 0,
+      like_count: 0,
+      dislike_count: 0,
+      comment_count: 0,
+      category: { id: 'cat-1', slug: 'educacao', name: 'Educação' },
+      created_at: new Date('2026-10-13T11:00:00.000Z'),
+    } as unknown as Video;
 
-    it('should return a ready video to an anonymous caller', async () => {
-      videos.findOneBy.mockResolvedValue(base);
+    it('should return a published video to an anonymous caller with every field', async () => {
+      videos.findOne.mockResolvedValue(base);
 
       const result = await service.getVideo('AAAAAAAAAAA');
 
       expect(result).toEqual({
         id: 'AAAAAAAAAAA',
         title: 'Aula',
+        description: 'Descrição',
         status: VideoStatus.READY,
+        publicationState: 'published',
+        visibility: 'public',
+        publishedAt: '2026-10-13T12:00:00.000Z',
+        category: { id: 'cat-1', slug: 'educacao', name: 'Educação' },
         durationSeconds: 125.5,
         thumbnailUrl: 'https://storage/signed',
         errorReason: null,
-        createdAt: '2026-10-13T12:00:00.000Z',
+        viewCount: 0,
+        likeCount: 0,
+        dislikeCount: 0,
+        commentCount: 0,
+        createdAt: '2026-10-13T11:00:00.000Z',
       });
-      expect(channels.findOneBy).not.toHaveBeenCalled();
+      expect(videos.findOne).toHaveBeenCalledWith({
+        where: { public_id: 'AAAAAAAAAAA' },
+        relations: { category: true },
+      });
     });
 
-    it('should return no thumbnail URL before the thumbnail exists', async () => {
-      videos.findOneBy.mockResolvedValue({ ...base, thumbnail_key: null });
+    it('should return null category and thumbnail when they are not set', async () => {
+      videos.findOne.mockResolvedValue({
+        ...base,
+        category: null,
+        thumbnail_key: null,
+      });
 
       const result = await service.getVideo('AAAAAAAAAAA');
 
+      expect(result.category).toBeNull();
       expect(result.thumbnailUrl).toBeNull();
       expect(storage.presignGetObject).not.toHaveBeenCalled();
     });
 
-    it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
-      'should hide a %s video from anonymous callers',
-      async (status) => {
-        videos.findOneBy.mockResolvedValue({ ...base, status });
-
-        await expect(service.getVideo('AAAAAAAAAAA')).rejects.toBeInstanceOf(
-          VideoNotFoundException,
-        );
-      },
-    );
-
-    it('should hide a non-ready video from another signed-in user', async () => {
-      videos.findOneBy.mockResolvedValue({
+    it('should let an anonymous caller open an unlisted published video by link', async () => {
+      videos.findOne.mockResolvedValue({
         ...base,
-        status: VideoStatus.DRAFT,
+        visibility: VideoVisibility.UNLISTED,
       });
+
+      const result = await service.getVideo('AAAAAAAAAAA');
+
+      expect(result.visibility).toBe('unlisted');
+    });
+
+    it('should hide a ready but unpublished video from anonymous callers', async () => {
+      videos.findOne.mockResolvedValue({ ...base, published_at: null });
+
+      await expect(service.getVideo('AAAAAAAAAAA')).rejects.toBeInstanceOf(
+        VideoNotFoundException,
+      );
+    });
+
+    it('should hide a ready but unpublished video from another signed-in user', async () => {
+      videos.findOne.mockResolvedValue({ ...base, published_at: null });
       channels.findOneBy.mockResolvedValue(null);
 
       await expect(
@@ -660,23 +726,41 @@ describe('VideosService', () => {
       });
     });
 
-    it('should show a processing video to its owner', async () => {
-      videos.findOneBy.mockResolvedValue({
-        ...base,
-        status: VideoStatus.PROCESSING,
-        duration_seconds: null,
-        thumbnail_key: null,
-      });
+    it('should show a ready but unpublished video to its owner as unpublished', async () => {
+      videos.findOne.mockResolvedValue({ ...base, published_at: null });
 
       const result = await service.getVideo('AAAAAAAAAAA', 'user-1');
 
-      expect(result.status).toBe(VideoStatus.PROCESSING);
+      expect(result.publicationState).toBe('unpublished');
+      expect(result.publishedAt).toBeNull();
     });
 
+    it.each([
+      [VideoStatus.DRAFT, 'uploading'],
+      [VideoStatus.PROCESSING, 'processing'],
+      [VideoStatus.ERROR, 'error'],
+    ])(
+      'should hide a %s video from anonymous callers and show it to the owner as %s',
+      async (status, state) => {
+        videos.findOne.mockResolvedValue({
+          ...base,
+          status,
+          published_at: null,
+        });
+
+        await expect(service.getVideo('AAAAAAAAAAA')).rejects.toBeInstanceOf(
+          VideoNotFoundException,
+        );
+        const result = await service.getVideo('AAAAAAAAAAA', 'user-1');
+        expect(result.publicationState).toBe(state);
+      },
+    );
+
     it('should show the error reason only to the owner', async () => {
-      videos.findOneBy.mockResolvedValue({
+      videos.findOne.mockResolvedValue({
         ...base,
         status: VideoStatus.ERROR,
+        published_at: null,
         error_reason: 'INVALID_MEDIA',
       });
 
@@ -685,8 +769,8 @@ describe('VideosService', () => {
       expect(result.errorReason).toBe('INVALID_MEDIA');
     });
 
-    it('should not leak the error reason of a ready video', async () => {
-      videos.findOneBy.mockResolvedValue({ ...base, error_reason: 'LEFTOVER' });
+    it('should not leak the error reason of a published video', async () => {
+      videos.findOne.mockResolvedValue({ ...base, error_reason: 'LEFTOVER' });
 
       const result = await service.getVideo('AAAAAAAAAAA', 'user-1');
 
@@ -694,7 +778,7 @@ describe('VideosService', () => {
     });
 
     it('should report an unknown video as not found', async () => {
-      videos.findOneBy.mockResolvedValue(null);
+      videos.findOne.mockResolvedValue(null);
 
       await expect(service.getVideo('ZZZZZZZZZZZ')).rejects.toBeInstanceOf(
         VideoNotFoundException,
@@ -708,12 +792,14 @@ describe('VideosService', () => {
       public_id: 'AAAAAAAAAAA',
       channel_id: 'channel-1',
       status: VideoStatus.READY,
+      visibility: VideoVisibility.PUBLIC,
+      published_at: new Date('2026-10-13T12:00:00.000Z'),
       storage_key: 'videos/video-1/original.mp4',
       file_name: 'aula.mp4',
-    } as Video;
+    } as unknown as Video;
 
     it('should sign the original object for streaming without a download name', async () => {
-      videos.findOneBy.mockResolvedValue(ready);
+      videos.findOne.mockResolvedValue(ready);
 
       const result = await service.getPlaybackUrl('AAAAAAAAAAA', undefined, {
         download: false,
@@ -727,7 +813,7 @@ describe('VideosService', () => {
     });
 
     it('should pass the original file name when downloading', async () => {
-      videos.findOneBy.mockResolvedValue(ready);
+      videos.findOne.mockResolvedValue(ready);
 
       await service.getPlaybackUrl('AAAAAAAAAAA', undefined, {
         download: true,
@@ -739,10 +825,38 @@ describe('VideosService', () => {
       );
     });
 
+    it('should let anonymous callers stream an unlisted published video', async () => {
+      videos.findOne.mockResolvedValue({
+        ...ready,
+        visibility: VideoVisibility.UNLISTED,
+      });
+
+      await expect(
+        service.getPlaybackUrl('AAAAAAAAAAA', undefined, { download: false }),
+      ).resolves.toMatchObject({ url: 'https://storage/signed' });
+    });
+
+    it('should hide a ready but unpublished video from anonymous callers', async () => {
+      videos.findOne.mockResolvedValue({ ...ready, published_at: null });
+
+      await expect(
+        service.getPlaybackUrl('AAAAAAAAAAA', undefined, { download: true }),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+
+    it('should let the owner stream a ready but unpublished video', async () => {
+      videos.findOne.mockResolvedValue({ ...ready, published_at: null });
+
+      await expect(
+        service.getPlaybackUrl('AAAAAAAAAAA', 'user-1', { download: false }),
+      ).resolves.toMatchObject({ url: 'https://storage/signed' });
+    });
+
     it('should tell the owner that a processing video is not ready', async () => {
-      videos.findOneBy.mockResolvedValue({
+      videos.findOne.mockResolvedValue({
         ...ready,
         status: VideoStatus.PROCESSING,
+        published_at: null,
       });
 
       await expect(
@@ -752,9 +866,10 @@ describe('VideosService', () => {
     });
 
     it('should hide a non-ready video from anonymous callers', async () => {
-      videos.findOneBy.mockResolvedValue({
+      videos.findOne.mockResolvedValue({
         ...ready,
         status: VideoStatus.PROCESSING,
+        published_at: null,
       });
 
       await expect(
@@ -763,9 +878,10 @@ describe('VideosService', () => {
     });
 
     it('should hide a non-ready video from another signed-in user', async () => {
-      videos.findOneBy.mockResolvedValue({
+      videos.findOne.mockResolvedValue({
         ...ready,
         status: VideoStatus.ERROR,
+        published_at: null,
       });
       channels.findOneBy.mockResolvedValue(null);
 
@@ -777,11 +893,527 @@ describe('VideosService', () => {
     });
 
     it('should report an unknown video as not found', async () => {
-      videos.findOneBy.mockResolvedValue(null);
+      videos.findOne.mockResolvedValue(null);
 
       await expect(
         service.getPlaybackUrl('ZZZZZZZZZZZ', undefined, { download: false }),
       ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('updateVideo', () => {
+    const owned = {
+      id: 'video-1',
+      public_id: 'AAAAAAAAAAA',
+      channel_id: 'channel-1',
+      status: VideoStatus.READY,
+      upload_id: null,
+      visibility: VideoVisibility.PUBLIC,
+      published_at: null,
+      view_count: 0,
+      like_count: 0,
+      dislike_count: 0,
+      comment_count: 0,
+      category: null,
+      created_at: new Date('2026-10-13T11:00:00.000Z'),
+    } as unknown as Video;
+
+    beforeEach(() => {
+      videos.findOneBy.mockResolvedValue(owned);
+      videos.findOneOrFail.mockResolvedValue({
+        ...owned,
+        title: 'Novo título',
+      });
+    });
+
+    it('should update only the informed fields and return the reloaded video', async () => {
+      const result = await service.updateVideo('user-1', 'AAAAAAAAAAA', {
+        title: 'Novo título',
+        visibility: VideoVisibility.UNLISTED,
+      });
+
+      expect(videos.update).toHaveBeenCalledWith(
+        { id: 'video-1' },
+        { title: 'Novo título', visibility: VideoVisibility.UNLISTED },
+      );
+      expect(result.title).toBe('Novo título');
+      expect(videos.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: 'video-1' },
+        relations: { category: true },
+      });
+    });
+
+    it.each([[null], ['']])(
+      'should clear the description when it is %p',
+      async (value) => {
+        await service.updateVideo('user-1', 'AAAAAAAAAAA', {
+          description: value,
+        });
+
+        expect(videos.update).toHaveBeenCalledWith(
+          { id: 'video-1' },
+          { description: null },
+        );
+      },
+    );
+
+    it('should link an existing category', async () => {
+      await service.updateVideo('user-1', 'AAAAAAAAAAA', {
+        categoryId: 'cat-1',
+      });
+
+      expect(categories.existsBy).toHaveBeenCalledWith({ id: 'cat-1' });
+      expect(videos.update).toHaveBeenCalledWith(
+        { id: 'video-1' },
+        { category_id: 'cat-1' },
+      );
+    });
+
+    it('should reject an unknown category without touching the video', async () => {
+      categories.existsBy.mockResolvedValue(false);
+
+      await expect(
+        service.updateVideo('user-1', 'AAAAAAAAAAA', { categoryId: 'nope' }),
+      ).rejects.toBeInstanceOf(CategoryNotFoundException);
+      expect(videos.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject an edit while the upload is still open', async () => {
+      videos.findOneBy.mockResolvedValue({
+        ...owned,
+        status: VideoStatus.DRAFT,
+        upload_id: 'upload-1',
+      });
+
+      await expect(
+        service.updateVideo('user-1', 'AAAAAAAAAAA', { title: 'x' }),
+      ).rejects.toBeInstanceOf(VideoUploadInProgressException);
+      expect(videos.update).not.toHaveBeenCalled();
+    });
+
+    it('should allow editing a draft whose upload is no longer open', async () => {
+      videos.findOneBy.mockResolvedValue({
+        ...owned,
+        status: VideoStatus.DRAFT,
+        upload_id: null,
+      });
+
+      await expect(
+        service.updateVideo('user-1', 'AAAAAAAAAAA', { title: 'x' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('should hide a video the caller does not own', async () => {
+      videos.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.updateVideo('other-user', 'AAAAAAAAAAA', { title: 'x' }),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+
+    it('should reject a body without any field', async () => {
+      await expect(
+        service.updateVideo('user-1', 'AAAAAAAAAAA', {}),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(videos.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('publishVideo', () => {
+    const ready = {
+      id: 'video-1',
+      public_id: 'AAAAAAAAAAA',
+      channel_id: 'channel-1',
+      status: VideoStatus.READY,
+      category_id: 'cat-1',
+      published_at: null,
+      visibility: VideoVisibility.PUBLIC,
+      view_count: 0,
+      like_count: 0,
+      dislike_count: 0,
+      comment_count: 0,
+      category: { id: 'cat-1', slug: 'educacao', name: 'Educação' },
+      created_at: new Date('2026-10-13T11:00:00.000Z'),
+    } as unknown as Video;
+
+    beforeEach(() => {
+      videos.findOneBy.mockResolvedValue(ready);
+      videos.findOneOrFail.mockResolvedValue({
+        ...ready,
+        published_at: new Date('2026-10-13T12:00:00.000Z'),
+      });
+    });
+
+    it('should stamp published_at and return the published video', async () => {
+      const result = await service.publishVideo('user-1', 'AAAAAAAAAAA', {});
+
+      expect(videos.update).toHaveBeenCalledWith(
+        { id: 'video-1' },
+        { published_at: expect.any(Date) as Date },
+      );
+      expect(result.publicationState).toBe('published');
+      expect(result.publishedAt).toBe('2026-10-13T12:00:00.000Z');
+    });
+
+    it('should apply the informed visibility together with the publication', async () => {
+      await service.publishVideo('user-1', 'AAAAAAAAAAA', {
+        visibility: VideoVisibility.UNLISTED,
+      });
+
+      expect(videos.update).toHaveBeenCalledWith(
+        { id: 'video-1' },
+        {
+          published_at: expect.any(Date) as Date,
+          visibility: VideoVisibility.UNLISTED,
+        },
+      );
+    });
+
+    it.each([VideoStatus.DRAFT, VideoStatus.PROCESSING, VideoStatus.ERROR])(
+      'should reject a %s video as not ready',
+      async (status) => {
+        videos.findOneBy.mockResolvedValue({ ...ready, status });
+
+        await expect(
+          service.publishVideo('user-1', 'AAAAAAAAAAA', {}),
+        ).rejects.toBeInstanceOf(VideoNotReadyException);
+        expect(videos.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should reject a video that is already published', async () => {
+      videos.findOneBy.mockResolvedValue({
+        ...ready,
+        published_at: new Date(),
+      });
+
+      await expect(
+        service.publishVideo('user-1', 'AAAAAAAAAAA', {}),
+      ).rejects.toBeInstanceOf(VideoAlreadyPublishedException);
+    });
+
+    it('should require a category', async () => {
+      videos.findOneBy.mockResolvedValue({ ...ready, category_id: null });
+
+      await expect(
+        service.publishVideo('user-1', 'AAAAAAAAAAA', {}),
+      ).rejects.toBeInstanceOf(CategoryRequiredException);
+      expect(videos.update).not.toHaveBeenCalled();
+    });
+
+    it('should hide a video the caller does not own', async () => {
+      videos.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.publishVideo('other-user', 'AAAAAAAAAAA', {}),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('replaceThumbnail', () => {
+    const owned = {
+      id: 'video-1',
+      public_id: 'AAAAAAAAAAA',
+      channel_id: 'channel-1',
+      status: VideoStatus.READY,
+      upload_id: null,
+    } as unknown as Video;
+    const file = { buffer: Buffer.from('png') };
+
+    beforeEach(() => {
+      videos.findOneBy.mockResolvedValue(owned);
+      storage.presignGetObject.mockResolvedValue('https://signed');
+    });
+
+    it('should store the normalized image and point thumbnail_key at it', async () => {
+      const result = await service.replaceThumbnail(
+        'user-1',
+        'AAAAAAAAAAA',
+        file,
+      );
+
+      expect(thumbnails.normalize).toHaveBeenCalledWith(file.buffer);
+      expect(storage.putObject).toHaveBeenCalledWith(
+        'videos/video-1/thumbnail-custom.jpg',
+        Buffer.from('jpeg'),
+        'image/jpeg',
+      );
+      expect(videos.update).toHaveBeenCalledWith(
+        { id: 'video-1' },
+        { thumbnail_key: 'videos/video-1/thumbnail-custom.jpg' },
+      );
+      expect(result).toEqual({ thumbnailUrl: 'https://signed' });
+    });
+
+    it('should reject a request without a file', async () => {
+      await expect(
+        service.replaceThumbnail('user-1', 'AAAAAAAAAAA', undefined),
+      ).rejects.toBeInstanceOf(InvalidThumbnailException);
+      expect(storage.putObject).not.toHaveBeenCalled();
+    });
+
+    it('should not touch storage when the image is invalid', async () => {
+      thumbnails.normalize.mockRejectedValue(new InvalidThumbnailException());
+
+      await expect(
+        service.replaceThumbnail('user-1', 'AAAAAAAAAAA', file),
+      ).rejects.toBeInstanceOf(InvalidThumbnailException);
+      expect(storage.putObject).not.toHaveBeenCalled();
+      expect(videos.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject a draft with an open upload', async () => {
+      videos.findOneBy.mockResolvedValue({
+        ...owned,
+        status: VideoStatus.DRAFT,
+        upload_id: 'upload-1',
+      });
+
+      await expect(
+        service.replaceThumbnail('user-1', 'AAAAAAAAAAA', file),
+      ).rejects.toBeInstanceOf(VideoUploadInProgressException);
+    });
+
+    it('should hide a video the caller does not own', async () => {
+      videos.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.replaceThumbnail('other-user', 'AAAAAAAAAAA', file),
+      ).rejects.toBeInstanceOf(VideoNotFoundException);
+    });
+  });
+
+  describe('listMyVideos', () => {
+    function makeQb(result: [unknown[], number]) {
+      const qb: Record<string, jest.Mock> = {};
+      for (const name of [
+        'where',
+        'andWhere',
+        'orderBy',
+        'addOrderBy',
+        'skip',
+        'take',
+      ]) {
+        qb[name] = jest.fn().mockReturnValue(qb);
+      }
+      qb.getManyAndCount = jest.fn().mockResolvedValue(result);
+      return qb;
+    }
+
+    const row = (overrides: Record<string, unknown> = {}) => ({
+      public_id: 'AAAAAAAAAAA',
+      title: 'Aula',
+      thumbnail_key: null,
+      status: VideoStatus.READY,
+      visibility: VideoVisibility.PUBLIC,
+      published_at: null,
+      created_at: new Date('2026-10-13T10:00:00.000Z'),
+      view_count: 1,
+      like_count: 2,
+      dislike_count: 3,
+      comment_count: 4,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      channels.findOneBy.mockResolvedValue({ id: 'channel-1' });
+    });
+
+    it.each([
+      ['uploading', [{ status: VideoStatus.DRAFT }], false],
+      ['processing', [{ status: VideoStatus.PROCESSING }], false],
+      ['error', [{ status: VideoStatus.ERROR }], false],
+      ['unpublished', [{ status: VideoStatus.READY }], 'IS NULL'],
+      ['published', [{ status: VideoStatus.READY }], 'IS NOT NULL'],
+    ])(
+      'should map publicationState %s to status/published_at conditions',
+      async (state, [status], publishedAtCondition) => {
+        const qb = makeQb([[], 0]);
+        videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+        await service.listMyVideos('user-1', {
+          page: 1,
+          pageSize: 20,
+          sort: MyVideosSort.CREATED_AT,
+          order: SortOrder.DESC,
+          publicationState: state as PublicationState,
+        });
+
+        expect(qb.andWhere).toHaveBeenCalledWith(
+          'video.status = :status',
+          status,
+        );
+        if (publishedAtCondition) {
+          expect(qb.andWhere).toHaveBeenCalledWith(
+            `video.published_at ${publishedAtCondition}`,
+          );
+        }
+      },
+    );
+
+    it('should order by the whitelisted column and paginate with skip/take', async () => {
+      const qb = makeQb([[], 0]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.listMyVideos('user-1', {
+        page: 3,
+        pageSize: 10,
+        sort: MyVideosSort.VIEW_COUNT,
+        order: SortOrder.ASC,
+      });
+
+      expect(qb.orderBy).toHaveBeenCalledWith(
+        'video.view_count',
+        'ASC',
+        'NULLS LAST',
+      );
+      expect(qb.skip).toHaveBeenCalledWith(20);
+      expect(qb.take).toHaveBeenCalledWith(10);
+    });
+
+    it('should build the page with derived state and signed thumbnail', async () => {
+      const qb = makeQb([
+        [row({ thumbnail_key: 'videos/x/thumbnail.jpg' }), row()],
+        7,
+      ]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+      storage.presignGetObject.mockResolvedValue('https://signed');
+
+      const page = await service.listMyVideos('user-1', {
+        page: 1,
+        pageSize: 20,
+        sort: MyVideosSort.CREATED_AT,
+        order: SortOrder.DESC,
+      });
+
+      expect(page).toMatchObject({ page: 1, pageSize: 20, total: 7 });
+      expect(page.items[0]).toMatchObject({
+        id: 'AAAAAAAAAAA',
+        thumbnailUrl: 'https://signed',
+        publicationState: 'unpublished',
+        viewCount: 1,
+        dislikeCount: 3,
+      });
+      expect(page.items[1].thumbnailUrl).toBeNull();
+    });
+
+    it('should fail when the user has no channel', async () => {
+      channels.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.listMyVideos('user-1', {
+          page: 1,
+          pageSize: 20,
+          sort: MyVideosSort.CREATED_AT,
+          order: SortOrder.DESC,
+        }),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
+    });
+  });
+
+  describe('listChannelVideos', () => {
+    function makeQb(rows: unknown[]) {
+      const qb: Record<string, jest.Mock> = {};
+      for (const name of [
+        'where',
+        'andWhere',
+        'orderBy',
+        'addOrderBy',
+        'limit',
+      ]) {
+        qb[name] = jest.fn().mockReturnValue(qb);
+      }
+      qb.getMany = jest.fn().mockResolvedValue(rows);
+      return qb;
+    }
+
+    const row = (n: number) => ({
+      id: `3f2b8a52-7c1d-4e0a-9d55-1a2b3c4d5e0${n}`,
+      public_id: `PUBLICID000${n}`,
+      title: `Video ${n}`,
+      thumbnail_key: null,
+      duration_seconds: 60,
+      published_at: new Date(`2026-10-1${n}T10:00:00.000Z`),
+      view_count: n,
+    });
+
+    beforeEach(() => {
+      channels.findOneBy.mockResolvedValue({ id: 'channel-1' });
+    });
+
+    it('should only query ready, published and public videos of the channel', async () => {
+      const qb = makeQb([]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const page = await service.listChannelVideos('nick', { limit: 24 });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('video.status = :status', {
+        status: VideoStatus.READY,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'video.published_at IS NOT NULL',
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'video.visibility = :visibility',
+        {
+          visibility: VideoVisibility.PUBLIC,
+        },
+      );
+      expect(page).toEqual({ items: [], nextCursor: null });
+    });
+
+    it('should fetch limit + 1 rows and expose a nextCursor when there are more', async () => {
+      const qb = makeQb([row(3), row(2), row(1)]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const page = await service.listChannelVideos('nick', { limit: 2 });
+
+      expect(qb.limit).toHaveBeenCalledWith(3);
+      expect(page.items.map((i) => i.id)).toEqual([
+        'PUBLICID0003',
+        'PUBLICID0002',
+      ]);
+      expect(decodeCursor(page.nextCursor!)).toEqual({
+        publishedAt: row(2).published_at,
+        id: row(2).id,
+      });
+    });
+
+    it('should return a null nextCursor on the last page', async () => {
+      const qb = makeQb([row(2), row(1)]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const page = await service.listChannelVideos('nick', { limit: 2 });
+
+      expect(page.items).toHaveLength(2);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it('should apply the cursor as a keyset condition', async () => {
+      const qb = makeQb([]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+      const cursor = encodeCursor({
+        publishedAt: row(2).published_at,
+        id: row(2).id,
+      });
+
+      await service.listChannelVideos('nick', { limit: 24, cursor });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('< (:publishedAt, :cursorId)'),
+        { publishedAt: row(2).published_at, cursorId: row(2).id },
+      );
+    });
+
+    it('should reject a malformed cursor and an unknown channel', async () => {
+      await expect(
+        service.listChannelVideos('nick', { limit: 24, cursor: 'invalido' }),
+      ).rejects.toBeInstanceOf(InvalidCursorException);
+
+      channels.findOneBy.mockResolvedValue(null);
+      await expect(
+        service.listChannelVideos('nope', { limit: 24 }),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
     });
   });
 });

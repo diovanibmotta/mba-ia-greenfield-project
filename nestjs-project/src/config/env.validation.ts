@@ -36,5 +36,8 @@ export const envValidationSchema = Joi.object({
   VIDEO_MAX_SIZE_BYTES: Joi.number().integer().min(1).default(10737418240),
   VIDEO_PART_SIZE_BYTES: Joi.number().integer().min(5242880).default(16777216),
   VIDEO_UPLOAD_ABANDON_DAYS: Joi.number().integer().min(1).default(1),
+  VIDEO_THUMBNAIL_MAX_BYTES: Joi.number().integer().min(1).default(2097152),
+  VIDEO_THUMBNAIL_MAX_WIDTH: Joi.number().integer().min(1).default(1280),
+  VIDEO_THUMBNAIL_MAX_HEIGHT: Joi.number().integer().min(1).default(720),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
 });

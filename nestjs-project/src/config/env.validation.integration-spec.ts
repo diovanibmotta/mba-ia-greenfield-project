@@ -91,3 +91,30 @@ describe('envValidationSchema — video storage and queue', () => {
     expect(error!.message).toContain('VIDEO_PART_SIZE_BYTES');
   });
 });
+
+describe('envValidationSchema — video thumbnail limits', () => {
+  it('should apply the thumbnail defaults', () => {
+    const result = validate({}) as {
+      value: Record<string, number>;
+      error?: unknown;
+    };
+
+    expect(result.error).toBeUndefined();
+    expect(result.value).toMatchObject({
+      VIDEO_THUMBNAIL_MAX_BYTES: 2097152,
+      VIDEO_THUMBNAIL_MAX_WIDTH: 1280,
+      VIDEO_THUMBNAIL_MAX_HEIGHT: 720,
+    });
+  });
+
+  it.each([
+    'VIDEO_THUMBNAIL_MAX_BYTES',
+    'VIDEO_THUMBNAIL_MAX_WIDTH',
+    'VIDEO_THUMBNAIL_MAX_HEIGHT',
+  ])('should reject %s=0', (name) => {
+    const { error } = validate({ [name]: '0' });
+
+    expect(error).toBeDefined();
+    expect(error!.message).toContain(name);
+  });
+});

@@ -20,6 +20,9 @@ const video = {
   maxSizeBytes: 10737418240,
   partSizeBytes: 16777216,
   uploadAbandonDays: 3,
+  thumbnailMaxBytes: 2097152,
+  thumbnailMaxWidth: 1280,
+  thumbnailMaxHeight: 720,
 };
 
 function buildService(send: jest.Mock) {

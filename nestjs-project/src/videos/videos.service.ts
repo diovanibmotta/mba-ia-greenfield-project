@@ -1,20 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Queue } from 'bullmq';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Category } from '../categories/entities/category.entity';
 import { Channel } from '../channels/entities/channel.entity';
+import { decodeCursor, encodeCursor } from '../common/pagination/cursor.util';
+import { buildPage, Page } from '../common/pagination/page-response';
+import { isPgUniqueViolationOnColumn } from '../common/database/pg-errors.util';
 import {
+  CategoryNotFoundException,
+  CategoryRequiredException,
+  ChannelNotFoundException,
   FileTooLargeException,
+  InvalidThumbnailException,
   InvalidPartListException,
   InvalidPartNumberException,
   InvalidUploadStateException,
   UnsupportedMediaTypeException,
   UploadSizeMismatchException,
   VideoNotFoundException,
+  VideoAlreadyPublishedException,
   VideoNotReadyException,
+  VideoUploadInProgressException,
 } from '../common/exceptions/domain.exception';
 import queueConfig from '../config/queue.config';
 import videoConfig from '../config/video.config';
@@ -30,15 +40,43 @@ import { CreateVideoDto } from './dto/create-video.dto';
 import { CreateVideoResponseDto } from './dto/create-video-response.dto';
 import { PartUrlsResponseDto } from './dto/part-urls-response.dto';
 import { PlaybackUrlResponseDto } from './dto/playback-url-response.dto';
+import { PublishVideoDto } from './dto/publish-video.dto';
+import { UpdateVideoDto } from './dto/update-video.dto';
 import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
+import {
+  ChannelVideoItemDto,
+  ChannelVideosPageDto,
+} from './dto/channel-video-item.dto';
+import { ListChannelVideosQueryDto } from './dto/list-channel-videos-query.dto';
+import {
+  ListMyVideosQueryDto,
+  MyVideosSort,
+} from './dto/list-my-videos-query.dto';
+import { MyVideoItemDto } from './dto/my-video-item.dto';
+import { ThumbnailResponseDto } from './dto/thumbnail-response.dto';
 import { VideoResponseDto } from './dto/video-response.dto';
 import { Video } from './entities/video.entity';
-import { isPgUniqueViolationOnColumn } from './pg-errors.util';
+import {
+  derivePublicationState,
+  isPublished,
+  PublicationState,
+} from './publication-state.util';
 import { generatePublicId } from './public-id.util';
+import { ThumbnailImageService } from './thumbnail-image.service';
 import { ALLOWED_VIDEO_CONTENT_TYPES } from './video.constants';
 import { VideoStatus } from './video-status.enum';
+import { VideoVisibility } from './video-visibility.enum';
 
 const PUBLIC_ID_COLUMN = 'public_id';
+
+const MY_VIDEOS_SORT_COLUMNS: Record<MyVideosSort, string> = {
+  [MyVideosSort.CREATED_AT]: 'video.created_at',
+  [MyVideosSort.PUBLISHED_AT]: 'video.published_at',
+  [MyVideosSort.TITLE]: 'video.title',
+  [MyVideosSort.VIEW_COUNT]: 'video.view_count',
+  [MyVideosSort.LIKE_COUNT]: 'video.like_count',
+  [MyVideosSort.COMMENT_COUNT]: 'video.comment_count',
+};
 const MAX_PUBLIC_ID_ATTEMPTS = 5;
 
 @Injectable()
@@ -53,6 +91,9 @@ export class VideosService {
     private readonly queue: Queue<VideoProcessJobData>,
     @Inject(queueConfig.KEY)
     private readonly queueSettings: ConfigType<typeof queueConfig>,
+    @InjectRepository(Category)
+    private readonly categories: Repository<Category>,
+    private readonly thumbnails: ThumbnailImageService,
   ) {}
 
   async createDraft(
@@ -237,10 +278,29 @@ export class VideosService {
 
   async getVideo(publicId: string, userId?: string): Promise<VideoResponseDto> {
     const { video, isOwner } = await this.findVisibleVideo(publicId, userId);
+    return this.toResponse(video, isOwner);
+  }
+
+  /** Maps a video row to the API response; `errorReason` is only shown to the owner. */
+  private async toResponse(
+    video: Video,
+    isOwner: boolean,
+  ): Promise<VideoResponseDto> {
     return {
       id: video.public_id,
       title: video.title,
+      description: video.description,
       status: video.status,
+      publicationState: derivePublicationState(video),
+      visibility: video.visibility,
+      publishedAt: video.published_at ? video.published_at.toISOString() : null,
+      category: video.category
+        ? {
+            id: video.category.id,
+            slug: video.category.slug,
+            name: video.category.name,
+          }
+        : null,
       durationSeconds: video.duration_seconds,
       thumbnailUrl: video.thumbnail_key
         ? await this.storage.presignGetObject(video.thumbnail_key)
@@ -249,6 +309,10 @@ export class VideosService {
         isOwner && video.status === VideoStatus.ERROR
           ? video.error_reason
           : null,
+      viewCount: video.view_count,
+      likeCount: video.like_count,
+      dislikeCount: video.dislike_count,
+      commentCount: video.comment_count,
       createdAt: video.created_at.toISOString(),
     };
   }
@@ -270,12 +334,15 @@ export class VideosService {
     return { url, expiresIn: this.storage.presignExpiresSeconds };
   }
 
-  /** `pronto` videos are public; any other status is visible only to the owning channel. */
+  /** A published video is reachable by link (public or unlisted); anything else only by the owning channel. */
   private async findVisibleVideo(
     publicId: string,
     userId?: string,
   ): Promise<{ video: Video; isOwner: boolean }> {
-    const video = await this.videos.findOneBy({ public_id: publicId });
+    const video = await this.videos.findOne({
+      where: { public_id: publicId },
+      relations: { category: true },
+    });
     if (!video) throw new VideoNotFoundException();
 
     const isOwner = userId
@@ -284,10 +351,234 @@ export class VideosService {
           user_id: userId,
         })) !== null
       : false;
-    if (video.status !== VideoStatus.READY && !isOwner) {
+    if (!isPublished(video) && !isOwner) {
       throw new VideoNotFoundException();
     }
     return { video, isOwner };
+  }
+
+  async updateVideo(
+    userId: string,
+    publicId: string,
+    dto: UpdateVideoDto,
+  ): Promise<VideoResponseDto> {
+    if (Object.values(dto).every((value) => value === undefined)) {
+      throw new BadRequestException('At least one field must be informed');
+    }
+    const video = await this.findOwnedVideo(userId, publicId);
+    this.assertEditable(video);
+
+    if (
+      dto.categoryId !== undefined &&
+      !(await this.categories.existsBy({ id: dto.categoryId }))
+    ) {
+      throw new CategoryNotFoundException();
+    }
+
+    const changes: Pick<
+      Partial<Video>,
+      'title' | 'description' | 'category_id' | 'visibility'
+    > = {};
+    if (dto.title !== undefined) changes.title = dto.title;
+    if (dto.description !== undefined) {
+      changes.description = dto.description === '' ? null : dto.description;
+    }
+    if (dto.categoryId !== undefined) changes.category_id = dto.categoryId;
+    if (dto.visibility !== undefined) changes.visibility = dto.visibility;
+    await this.videos.update({ id: video.id }, changes);
+
+    const updated = await this.videos.findOneOrFail({
+      where: { id: video.id },
+      relations: { category: true },
+    });
+    return this.toResponse(updated, true);
+  }
+
+  async publishVideo(
+    userId: string,
+    publicId: string,
+    dto: PublishVideoDto,
+  ): Promise<VideoResponseDto> {
+    const video = await this.findOwnedVideo(userId, publicId);
+    if (video.status !== VideoStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+    if (video.published_at) {
+      throw new VideoAlreadyPublishedException();
+    }
+    if (!video.category_id) {
+      throw new CategoryRequiredException();
+    }
+
+    await this.videos.update(
+      { id: video.id },
+      {
+        published_at: new Date(),
+        ...(dto.visibility !== undefined && { visibility: dto.visibility }),
+      },
+    );
+
+    const published = await this.videos.findOneOrFail({
+      where: { id: video.id },
+      relations: { category: true },
+    });
+    return this.toResponse(published, true);
+  }
+
+  async replaceThumbnail(
+    userId: string,
+    publicId: string,
+    file: { buffer: Buffer } | undefined,
+  ): Promise<ThumbnailResponseDto> {
+    const video = await this.findOwnedVideo(userId, publicId);
+    this.assertEditable(video);
+    if (!file?.buffer?.length) {
+      throw new InvalidThumbnailException();
+    }
+
+    const image = await this.thumbnails.normalize(file.buffer);
+    const key = `videos/${video.id}/thumbnail-custom.jpg`;
+    await this.storage.putObject(key, image, 'image/jpeg');
+    await this.videos.update({ id: video.id }, { thumbnail_key: key });
+
+    return { thumbnailUrl: await this.storage.presignGetObject(key) };
+  }
+
+  async listMyVideos(
+    userId: string,
+    query: ListMyVideosQueryDto,
+  ): Promise<Page<MyVideoItemDto>> {
+    const channel = await this.channels.findOneBy({ user_id: userId });
+    if (!channel) throw new ChannelNotFoundException();
+
+    const qb = this.videos
+      .createQueryBuilder('video')
+      .where('video.channel_id = :channelId', { channelId: channel.id });
+    if (query.publicationState) {
+      this.applyPublicationState(qb, query.publicationState);
+    }
+
+    const [videos, total] = await qb
+      .orderBy(
+        MY_VIDEOS_SORT_COLUMNS[query.sort],
+        query.order === 'asc' ? 'ASC' : 'DESC',
+        'NULLS LAST',
+      )
+      .addOrderBy('video.id', 'ASC')
+      .skip((query.page - 1) * query.pageSize)
+      .take(query.pageSize)
+      .getManyAndCount();
+
+    const items = await Promise.all(
+      videos.map(async (video) => ({
+        id: video.public_id,
+        title: video.title,
+        thumbnailUrl: video.thumbnail_key
+          ? await this.storage.presignGetObject(video.thumbnail_key)
+          : null,
+        status: video.status,
+        publicationState: derivePublicationState(video),
+        visibility: video.visibility,
+        publishedAt: video.published_at
+          ? video.published_at.toISOString()
+          : null,
+        createdAt: video.created_at.toISOString(),
+        viewCount: video.view_count,
+        likeCount: video.like_count,
+        dislikeCount: video.dislike_count,
+        commentCount: video.comment_count,
+      })),
+    );
+    return buildPage(items, query.page, query.pageSize, total);
+  }
+
+  async listChannelVideos(
+    nickname: string,
+    query: ListChannelVideosQueryDto,
+  ): Promise<ChannelVideosPageDto> {
+    const channel = await this.channels.findOneBy({ nickname });
+    if (!channel) throw new ChannelNotFoundException();
+    const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+
+    const publishedAtMs = "date_trunc('milliseconds', video.published_at)";
+    const qb = this.videos
+      .createQueryBuilder('video')
+      .where('video.channel_id = :channelId', { channelId: channel.id })
+      .andWhere('video.status = :status', { status: VideoStatus.READY })
+      .andWhere('video.published_at IS NOT NULL')
+      .andWhere('video.visibility = :visibility', {
+        visibility: VideoVisibility.PUBLIC,
+      });
+    if (cursor) {
+      qb.andWhere(`(${publishedAtMs}, video.id) < (:publishedAt, :cursorId)`, {
+        publishedAt: cursor.publishedAt,
+        cursorId: cursor.id,
+      });
+    }
+
+    const rows = await qb
+      .orderBy(publishedAtMs, 'DESC')
+      .addOrderBy('video.id', 'DESC')
+      .limit(query.limit + 1)
+      .getMany();
+
+    const hasMore = rows.length > query.limit;
+    const videos = hasMore ? rows.slice(0, query.limit) : rows;
+    const last = videos[videos.length - 1];
+
+    const items: ChannelVideoItemDto[] = await Promise.all(
+      videos.map(async (video) => ({
+        id: video.public_id,
+        title: video.title,
+        thumbnailUrl: video.thumbnail_key
+          ? await this.storage.presignGetObject(video.thumbnail_key)
+          : null,
+        durationSeconds: video.duration_seconds,
+        publishedAt: video.published_at!.toISOString(),
+        viewCount: video.view_count,
+      })),
+    );
+    return {
+      items,
+      nextCursor:
+        hasMore && last
+          ? encodeCursor({ publishedAt: last.published_at!, id: last.id })
+          : null,
+    };
+  }
+
+  private applyPublicationState(
+    qb: SelectQueryBuilder<Video>,
+    state: PublicationState,
+  ): void {
+    switch (state) {
+      case PublicationState.UPLOADING:
+        qb.andWhere('video.status = :status', { status: VideoStatus.DRAFT });
+        break;
+      case PublicationState.PROCESSING:
+        qb.andWhere('video.status = :status', {
+          status: VideoStatus.PROCESSING,
+        });
+        break;
+      case PublicationState.ERROR:
+        qb.andWhere('video.status = :status', { status: VideoStatus.ERROR });
+        break;
+      case PublicationState.UNPUBLISHED:
+        qb.andWhere('video.status = :status', { status: VideoStatus.READY });
+        qb.andWhere('video.published_at IS NULL');
+        break;
+      case PublicationState.PUBLISHED:
+        qb.andWhere('video.status = :status', { status: VideoStatus.READY });
+        qb.andWhere('video.published_at IS NOT NULL');
+        break;
+    }
+  }
+
+  /** Metadata cannot change while the upload is still open. */
+  private assertEditable(video: Video): void {
+    if (video.status === VideoStatus.DRAFT && video.upload_id) {
+      throw new VideoUploadInProgressException();
+    }
   }
 
   /** Upload operations are only valid on a draft that still has an open multipart. */

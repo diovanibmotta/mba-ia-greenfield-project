@@ -11,6 +11,7 @@ import { DomainExceptionFilter } from '../../src/common/filters/domain-exception
 import { ValidationExceptionFilter } from '../../src/common/filters/validation-exception.filter';
 import { StorageService } from '../../src/storage/storage.service';
 import { Video } from '../../src/videos/entities/video.entity';
+import { VideoStatus } from '../../src/videos/video-status.enum';
 import { cleanAllTables } from '../../src/test/create-test-data-source';
 import { createUserWithChannel } from '../../src/test/video-fixtures';
 import type { UserWithChannel } from '../../src/test/video-fixtures';
@@ -131,6 +132,12 @@ export async function insertVideo(
       declared_size: 1000,
       size_bytes: 1000,
       storage_key: 'videos/some/original.mp4',
+      // Ready videos were public before Phase 04; keep that default for the existing suites.
+      published_at:
+        overrides.status === VideoStatus.READY &&
+        overrides.published_at === undefined
+          ? new Date()
+          : null,
       ...overrides,
     }),
   );
