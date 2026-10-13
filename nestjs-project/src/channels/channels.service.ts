@@ -1,24 +1,16 @@
-import { Injectable } from '@nestjs/common';
-import { DataSource, QueryFailedError } from 'typeorm';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { isPgUniqueViolationOnColumn } from '../common/database/pg-errors.util';
+import {
+  ChannelNotFoundException,
+  NicknameAlreadyExistsException,
+} from '../common/exceptions/domain.exception';
+import { UpdateChannelDto } from './dto/update-channel.dto';
 import { appendRandomSuffix, sanitizeNickname } from './nickname.util';
 import { Channel } from './entities/channel.entity';
 
-const PG_UNIQUE_VIOLATION = '23505';
 const NICKNAME_COLUMN = 'nickname';
 const MAX_RETRIES = 5;
-
-function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
-  if (!(err instanceof QueryFailedError)) return false;
-  const { code, detail } = err as QueryFailedError & {
-    code?: unknown;
-    detail?: unknown;
-  };
-  return (
-    code === PG_UNIQUE_VIOLATION &&
-    typeof detail === 'string' &&
-    detail.includes(column)
-  );
-}
 
 @Injectable()
 export class ChannelsService {
@@ -61,5 +53,47 @@ export class ChannelsService {
         'Nickname conflict could not be resolved after max retries',
       );
     });
+  }
+
+  async findByUserId(userId: string): Promise<Channel> {
+    const channel = await this.dataSource
+      .getRepository(Channel)
+      .findOneBy({ user_id: userId });
+    if (!channel) throw new ChannelNotFoundException();
+    return channel;
+  }
+
+  async updateChannel(userId: string, dto: UpdateChannelDto): Promise<Channel> {
+    if (Object.values(dto).every((value) => value === undefined)) {
+      throw new BadRequestException('At least one field must be informed');
+    }
+    const channel = await this.findByUserId(userId);
+
+    const changes: Pick<
+      Partial<Channel>,
+      'nickname' | 'name' | 'description'
+    > = {};
+    if (dto.nickname !== undefined && dto.nickname !== channel.nickname) {
+      changes.nickname = dto.nickname;
+    }
+    if (dto.name !== undefined) changes.name = dto.name;
+    if (dto.description !== undefined) {
+      changes.description = dto.description === '' ? null : dto.description;
+    }
+    if (Object.keys(changes).length === 0) return channel;
+
+    try {
+      await this.dataSource
+        .getRepository(Channel)
+        .update({ id: channel.id }, changes);
+    } catch (error) {
+      if (isPgUniqueViolationOnColumn(error, NICKNAME_COLUMN)) {
+        throw new NicknameAlreadyExistsException();
+      }
+      throw error;
+    }
+    return this.dataSource
+      .getRepository(Channel)
+      .findOneByOrFail({ id: channel.id });
   }
 }

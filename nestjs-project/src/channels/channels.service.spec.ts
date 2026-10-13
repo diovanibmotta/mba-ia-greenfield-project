@@ -1,4 +1,9 @@
+import { BadRequestException } from '@nestjs/common';
 import { DataSource, QueryFailedError } from 'typeorm';
+import {
+  ChannelNotFoundException,
+  NicknameAlreadyExistsException,
+} from '../common/exceptions/domain.exception';
 import { ChannelsService } from './channels.service';
 import { Channel } from './entities/channel.entity';
 
@@ -145,6 +150,107 @@ describe('ChannelsService', () => {
         service.createChannel('user-id', 'carol@example.com'),
       ).rejects.toThrow('Connection lost');
       expect(manager.save).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('findByUserId', () => {
+    function makeRepoDataSource(repo: Record<string, jest.Mock>): DataSource {
+      return {
+        getRepository: jest.fn().mockReturnValue(repo),
+      } as unknown as DataSource;
+    }
+
+    it('returns the channel of the user', async () => {
+      const channel = makeChannel('mine');
+      const service = new ChannelsService(
+        makeRepoDataSource({ findOneBy: jest.fn().mockResolvedValue(channel) }),
+      );
+
+      await expect(service.findByUserId('user-id')).resolves.toBe(channel);
+    });
+
+    it('throws when the user has no channel', async () => {
+      const service = new ChannelsService(
+        makeRepoDataSource({ findOneBy: jest.fn().mockResolvedValue(null) }),
+      );
+
+      await expect(service.findByUserId('user-id')).rejects.toBeInstanceOf(
+        ChannelNotFoundException,
+      );
+    });
+  });
+
+  describe('updateChannel', () => {
+    function setup(update = jest.fn().mockResolvedValue(undefined)) {
+      const channel = makeChannel('current');
+      const repo = {
+        findOneBy: jest.fn().mockResolvedValue(channel),
+        findOneByOrFail: jest.fn().mockResolvedValue(channel),
+        update,
+      };
+      const service = new ChannelsService({
+        getRepository: jest.fn().mockReturnValue(repo),
+      } as unknown as DataSource);
+      return { service, repo, channel };
+    }
+
+    it('applies only the informed fields', async () => {
+      const { service, repo } = setup();
+
+      await service.updateChannel('user-id', { name: 'Novo' });
+
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'uuid' },
+        { name: 'Novo' },
+      );
+    });
+
+    it('clears the description with null or empty string', async () => {
+      for (const description of [null, '']) {
+        const { service, repo } = setup();
+
+        await service.updateChannel('user-id', { description });
+
+        expect(repo.update).toHaveBeenCalledWith(
+          { id: 'uuid' },
+          { description: null },
+        );
+      }
+    });
+
+    it('does not write when the nickname is the current one', async () => {
+      const { service, repo, channel } = setup();
+
+      await expect(
+        service.updateChannel('user-id', { nickname: 'current' }),
+      ).resolves.toBe(channel);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('maps a nickname unique violation to NicknameAlreadyExists', async () => {
+      const { service } = setup(jest.fn().mockRejectedValue(makeUniqueError()));
+
+      await expect(
+        service.updateChannel('user-id', { nickname: 'taken' }),
+      ).rejects.toBeInstanceOf(NicknameAlreadyExistsException);
+    });
+
+    it('rethrows other database errors', async () => {
+      const boom = new Error('boom');
+      const { service } = setup(jest.fn().mockRejectedValue(boom));
+
+      await expect(
+        service.updateChannel('user-id', { name: 'x' }),
+      ).rejects.toBe(boom);
+    });
+
+    it('rejects an empty body', async () => {
+      const { service, repo } = setup();
+
+      await expect(service.updateChannel('user-id', {})).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 });

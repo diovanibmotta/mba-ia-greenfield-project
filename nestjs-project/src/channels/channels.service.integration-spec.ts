@@ -6,6 +6,7 @@ import {
   createTestDataSource,
 } from '../test/create-test-data-source';
 import { User } from '../users/entities/user.entity';
+import { NicknameAlreadyExistsException } from '../common/exceptions/domain.exception';
 import { ChannelsService } from './channels.service';
 import { Channel } from './entities/channel.entity';
 import { Video } from '../videos/entities/video.entity';
@@ -96,6 +97,50 @@ describe('ChannelsService (integration)', () => {
 
       const channels = await channelRepository.find();
       expect(channels).toHaveLength(2);
+    });
+  });
+
+  describe('findByUserId / updateChannel', () => {
+    it('reads the channel of the user', async () => {
+      const user = await createUser();
+      const created = await channelsService.createChannel(
+        user.id,
+        'reader@example.com',
+      );
+
+      const found = await channelsService.findByUserId(user.id);
+
+      expect(found.id).toBe(created.id);
+    });
+
+    it('enforces nickname uniqueness and releases the old nickname', async () => {
+      const first = await createUser();
+      const second = await createUser();
+      await channelsService.createChannel(first.id, 'one@example.com');
+      await channelsService.createChannel(second.id, 'two@example.com');
+
+      await expect(
+        channelsService.updateChannel(second.id, { nickname: 'one' }),
+      ).rejects.toBeInstanceOf(NicknameAlreadyExistsException);
+
+      await channelsService.updateChannel(first.id, { nickname: 'renamed' });
+      const taken = await channelsService.updateChannel(second.id, {
+        nickname: 'one',
+      });
+      expect(taken.nickname).toBe('one');
+    });
+
+    it('keeps the current nickname without conflict and clears the description', async () => {
+      const user = await createUser();
+      await channelsService.createChannel(user.id, 'same@example.com');
+      await channelsService.updateChannel(user.id, { description: 'texto' });
+
+      const updated = await channelsService.updateChannel(user.id, {
+        nickname: 'same',
+        description: '',
+      });
+
+      expect(updated).toMatchObject({ nickname: 'same', description: null });
     });
   });
 });

@@ -7,6 +7,7 @@ import type { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
 import { Category } from '../categories/entities/category.entity';
 import { Channel } from '../channels/entities/channel.entity';
+import { isPgUniqueViolationOnColumn } from '../common/database/pg-errors.util';
 import {
   CategoryNotFoundException,
   CategoryRequiredException,
@@ -42,7 +43,6 @@ import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import { ThumbnailResponseDto } from './dto/thumbnail-response.dto';
 import { VideoResponseDto } from './dto/video-response.dto';
 import { Video } from './entities/video.entity';
-import { isPgUniqueViolationOnColumn } from './pg-errors.util';
 import { derivePublicationState, isPublished } from './publication-state.util';
 import { generatePublicId } from './public-id.util';
 import { ThumbnailImageService } from './thumbnail-image.service';

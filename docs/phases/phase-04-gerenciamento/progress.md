@@ -1,7 +1,7 @@
 # phase-04-gerenciamento — Progress
 
 **Status:** in_progress
-**SIs:** 8/13 completed
+**SIs:** 10/13 completed
 
 ### SI-04.1 — Infra: sharp, tipos do Multer, configuração de thumbnail e exceções de domínio
 - **Status:** completed
@@ -76,14 +76,19 @@ Response is { thumbnailUrl } (ThumbnailResponseDto). 2000x1500 input becomes 960
 Env note: run jest inside nestjs-api container (docker exec); never npm ci from Windows host.
 
 ### SI-04.9 — Endpoint GET /me/channel
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 198 passing (src/channels, videos.service, auth) + 3 e2e
+- **Observations:**
+MyChannelController (GET+PATCH /me/channel) registered in ChannelsModule; ChannelsService uses dataSource.getRepository(Channel) so its constructor is unchanged.
+test/me-channel-get.e2e-spec.ts authored from specs/me-channel-get.plan.md.
 
 ### SI-04.10 — Endpoint PATCH /me/channel
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** unit+integration passing + 9 e2e
+- **Observations:**
+pg-errors.util moved to src/common/database via git mv; ChannelsService duplicate helper removed.
+Empty body -> BadRequestException (same pattern as updateVideo); same nickname is a no-op returning the current channel.
+src/auth/auth.service.integration-spec.ts beforeAll can exceed 5s default timeout on cold ts-jest cache in container (passes with --testTimeout=60000); not a regression.
 
 ### SI-04.11 — Endpoint GET /me/videos
 - **Status:** pending
