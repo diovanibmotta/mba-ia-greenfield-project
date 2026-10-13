@@ -10,6 +10,8 @@ import { NicknameAlreadyExistsException } from '../common/exceptions/domain.exce
 import { ChannelsService } from './channels.service';
 import { Channel } from './entities/channel.entity';
 import { Video } from '../videos/entities/video.entity';
+import { VideoStatus } from '../videos/video-status.enum';
+import { VideoVisibility } from '../videos/video-visibility.enum';
 import { Category } from '../categories/entities/category.entity';
 
 const ALL_ENTITIES = [
@@ -141,6 +143,49 @@ describe('ChannelsService (integration)', () => {
       });
 
       expect(updated).toMatchObject({ nickname: 'same', description: null });
+    });
+  });
+
+  describe('getPublicChannel', () => {
+    it('counts only ready, published and public videos', async () => {
+      const user = await createUser();
+      const channel = await channelsService.createChannel(
+        user.id,
+        'counter@example.com',
+      );
+      const repository = dataSource.getRepository(Video);
+      const base = {
+        channel_id: channel.id,
+        title: 'v',
+        file_name: 'a.mp4',
+        content_type: 'video/mp4',
+        declared_size: 1000,
+      };
+      const rows: Partial<Video>[] = [
+        { status: VideoStatus.READY, published_at: new Date() },
+        { status: VideoStatus.READY, published_at: new Date() },
+        {
+          status: VideoStatus.READY,
+          published_at: new Date(),
+          visibility: VideoVisibility.UNLISTED,
+        },
+        { status: VideoStatus.READY, published_at: null },
+        { status: VideoStatus.PROCESSING, published_at: null },
+      ];
+      for (const [i, row] of rows.entries()) {
+        await repository.save(
+          repository.create({
+            ...base,
+            ...row,
+            public_id: `COUNT${String(i).padStart(6, '0')}`,
+            storage_key: `videos/count-${i}/original.mp4`,
+          }),
+        );
+      }
+
+      const result = await channelsService.getPublicChannel('counter');
+
+      expect(result.videoCount).toBe(2);
     });
   });
 });

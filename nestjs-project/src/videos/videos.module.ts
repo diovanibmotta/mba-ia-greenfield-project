@@ -9,6 +9,7 @@ import { VideoQueueModule } from '../queue/video-queue.module';
 import { StorageModule } from '../storage/storage.module';
 import { Video } from './entities/video.entity';
 import { Category } from '../categories/entities/category.entity';
+import { ChannelVideosController } from './channel-videos.controller';
 import { MyVideosController } from './my-videos.controller';
 import { ThumbnailImageService } from './thumbnail-image.service';
 import { VideosController } from './videos.controller';
@@ -28,7 +29,7 @@ import { VideosService } from './videos.service';
       }),
     }),
   ],
-  controllers: [VideosController, MyVideosController],
+  controllers: [VideosController, MyVideosController, ChannelVideosController],
   providers: [VideosService, ThumbnailImageService],
   exports: [VideosService],
 })

@@ -13,6 +13,7 @@ import {
   VideoNotFoundException,
   VideoNotReadyException,
   CategoryNotFoundException,
+  InvalidCursorException,
   ChannelNotFoundException,
   InvalidThumbnailException,
   CategoryRequiredException,
@@ -25,6 +26,7 @@ import { Video } from './entities/video.entity';
 import { VideoStatus } from './video-status.enum';
 import { VideoVisibility } from './video-visibility.enum';
 import { MyVideosSort, SortOrder } from './dto/list-my-videos-query.dto';
+import { decodeCursor, encodeCursor } from '../common/pagination/cursor.util';
 import { PublicationState } from './publication-state.util';
 import { ThumbnailImageService } from './thumbnail-image.service';
 import { VideosService } from './videos.service';
@@ -1305,6 +1307,112 @@ describe('VideosService', () => {
           sort: MyVideosSort.CREATED_AT,
           order: SortOrder.DESC,
         }),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
+    });
+  });
+
+  describe('listChannelVideos', () => {
+    function makeQb(rows: unknown[]) {
+      const qb: Record<string, jest.Mock> = {};
+      for (const name of [
+        'where',
+        'andWhere',
+        'orderBy',
+        'addOrderBy',
+        'limit',
+      ]) {
+        qb[name] = jest.fn().mockReturnValue(qb);
+      }
+      qb.getMany = jest.fn().mockResolvedValue(rows);
+      return qb;
+    }
+
+    const row = (n: number) => ({
+      id: `3f2b8a52-7c1d-4e0a-9d55-1a2b3c4d5e0${n}`,
+      public_id: `PUBLICID000${n}`,
+      title: `Video ${n}`,
+      thumbnail_key: null,
+      duration_seconds: 60,
+      published_at: new Date(`2026-10-1${n}T10:00:00.000Z`),
+      view_count: n,
+    });
+
+    beforeEach(() => {
+      channels.findOneBy.mockResolvedValue({ id: 'channel-1' });
+    });
+
+    it('should only query ready, published and public videos of the channel', async () => {
+      const qb = makeQb([]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const page = await service.listChannelVideos('nick', { limit: 24 });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('video.status = :status', {
+        status: VideoStatus.READY,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'video.published_at IS NOT NULL',
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'video.visibility = :visibility',
+        {
+          visibility: VideoVisibility.PUBLIC,
+        },
+      );
+      expect(page).toEqual({ items: [], nextCursor: null });
+    });
+
+    it('should fetch limit + 1 rows and expose a nextCursor when there are more', async () => {
+      const qb = makeQb([row(3), row(2), row(1)]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const page = await service.listChannelVideos('nick', { limit: 2 });
+
+      expect(qb.limit).toHaveBeenCalledWith(3);
+      expect(page.items.map((i) => i.id)).toEqual([
+        'PUBLICID0003',
+        'PUBLICID0002',
+      ]);
+      expect(decodeCursor(page.nextCursor!)).toEqual({
+        publishedAt: row(2).published_at,
+        id: row(2).id,
+      });
+    });
+
+    it('should return a null nextCursor on the last page', async () => {
+      const qb = makeQb([row(2), row(1)]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const page = await service.listChannelVideos('nick', { limit: 2 });
+
+      expect(page.items).toHaveLength(2);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it('should apply the cursor as a keyset condition', async () => {
+      const qb = makeQb([]);
+      videos.createQueryBuilder = jest.fn().mockReturnValue(qb);
+      const cursor = encodeCursor({
+        publishedAt: row(2).published_at,
+        id: row(2).id,
+      });
+
+      await service.listChannelVideos('nick', { limit: 24, cursor });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('< (:publishedAt, :cursorId)'),
+        { publishedAt: row(2).published_at, cursorId: row(2).id },
+      );
+    });
+
+    it('should reject a malformed cursor and an unknown channel', async () => {
+      await expect(
+        service.listChannelVideos('nick', { limit: 24, cursor: 'invalido' }),
+      ).rejects.toBeInstanceOf(InvalidCursorException);
+
+      channels.findOneBy.mockResolvedValue(null);
+      await expect(
+        service.listChannelVideos('nope', { limit: 24 }),
       ).rejects.toBeInstanceOf(ChannelNotFoundException);
     });
   });

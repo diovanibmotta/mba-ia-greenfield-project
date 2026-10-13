@@ -253,4 +253,38 @@ describe('ChannelsService', () => {
       expect(repo.update).not.toHaveBeenCalled();
     });
   });
+
+  describe('findByNickname / getPublicChannel', () => {
+    function makeDs(channel: Channel | null, count = 0): DataSource {
+      return {
+        getRepository: jest.fn((entity: unknown) =>
+          entity === Channel
+            ? { findOneBy: jest.fn().mockResolvedValue(channel) }
+            : { countBy: jest.fn().mockResolvedValue(count) },
+        ),
+      } as unknown as DataSource;
+    }
+
+    it('throws when the nickname does not exist', async () => {
+      const service = new ChannelsService(makeDs(null));
+
+      await expect(service.getPublicChannel('nope')).rejects.toBeInstanceOf(
+        ChannelNotFoundException,
+      );
+    });
+
+    it('builds the public response with the video count', async () => {
+      const channel = makeChannel('pub');
+      channel.created_at = new Date('2026-10-13T10:00:00.000Z');
+      const service = new ChannelsService(makeDs(channel, 4));
+
+      await expect(service.getPublicChannel('pub')).resolves.toEqual({
+        nickname: 'pub',
+        name: 'pub',
+        description: null,
+        createdAt: '2026-10-13T10:00:00.000Z',
+        videoCount: 4,
+      });
+    });
+  });
 });

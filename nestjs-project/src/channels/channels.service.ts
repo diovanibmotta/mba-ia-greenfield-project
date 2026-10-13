@@ -1,11 +1,15 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, Not, IsNull } from 'typeorm';
 import { isPgUniqueViolationOnColumn } from '../common/database/pg-errors.util';
 import {
   ChannelNotFoundException,
   NicknameAlreadyExistsException,
 } from '../common/exceptions/domain.exception';
+import { PublicChannelResponseDto } from './dto/public-channel-response.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
+import { Video } from '../videos/entities/video.entity';
+import { VideoStatus } from '../videos/video-status.enum';
+import { VideoVisibility } from '../videos/video-visibility.enum';
 import { appendRandomSuffix, sanitizeNickname } from './nickname.util';
 import { Channel } from './entities/channel.entity';
 
@@ -95,5 +99,30 @@ export class ChannelsService {
     return this.dataSource
       .getRepository(Channel)
       .findOneByOrFail({ id: channel.id });
+  }
+
+  async findByNickname(nickname: string): Promise<Channel> {
+    const channel = await this.dataSource
+      .getRepository(Channel)
+      .findOneBy({ nickname });
+    if (!channel) throw new ChannelNotFoundException();
+    return channel;
+  }
+
+  async getPublicChannel(nickname: string): Promise<PublicChannelResponseDto> {
+    const channel = await this.findByNickname(nickname);
+    const videoCount = await this.dataSource.getRepository(Video).countBy({
+      channel_id: channel.id,
+      status: VideoStatus.READY,
+      published_at: Not(IsNull()),
+      visibility: VideoVisibility.PUBLIC,
+    });
+    return {
+      nickname: channel.nickname,
+      name: channel.name,
+      description: channel.description,
+      createdAt: channel.created_at.toISOString(),
+      videoCount,
+    };
   }
 }

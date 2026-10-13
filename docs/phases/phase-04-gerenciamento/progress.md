@@ -1,7 +1,7 @@
 # phase-04-gerenciamento — Progress
 
 **Status:** in_progress
-**SIs:** 11/13 completed
+**SIs:** 13/13 completed
 
 ### SI-04.1 — Infra: sharp, tipos do Multer, configuração de thumbnail e exceções de domínio
 - **Status:** completed
@@ -99,12 +99,17 @@ Sort uses a whitelist map to columns with NULLS LAST and id tiebreaker; publicat
 Unit spec mocks the QueryBuilder chain (createQueryBuilder added to videos mock).
 
 ### SI-04.12 — Endpoint GET /channels/:nickname
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** unit+integration passing + 3 e2e
+- **Observations:**
+ChannelsController (GET /channels/:nickname, @Public) registered in ChannelsModule; Video added to forFeature.
+Test setup uses fixed 11-char public ids per seed run.
 
 ### SI-04.13 — Endpoint GET /channels/:nickname/videos
-- **Status:** pending
-- **Tests:** pending
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 218 passing (videos, channels, common) + 5 e2e
+- **Observations:**
+listChannelVideos resolves the channel via the existing channels Repository (findOneBy nickname) instead of ChannelsService.findByNickname, avoiding a new constructor dependency.
+Keyset compares date_trunc('milliseconds', published_at) with the ms-precision cursor to avoid repeats on rows with microsecond timestamps (migration backfill).
+cursor is base64url JSON {p: ISO date, i: internal uuid}.
 

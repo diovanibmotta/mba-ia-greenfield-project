@@ -7,6 +7,7 @@ import type { Queue } from 'bullmq';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { Category } from '../categories/entities/category.entity';
 import { Channel } from '../channels/entities/channel.entity';
+import { decodeCursor, encodeCursor } from '../common/pagination/cursor.util';
 import { buildPage, Page } from '../common/pagination/page-response';
 import { isPgUniqueViolationOnColumn } from '../common/database/pg-errors.util';
 import {
@@ -43,6 +44,11 @@ import { PublishVideoDto } from './dto/publish-video.dto';
 import { UpdateVideoDto } from './dto/update-video.dto';
 import { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
 import {
+  ChannelVideoItemDto,
+  ChannelVideosPageDto,
+} from './dto/channel-video-item.dto';
+import { ListChannelVideosQueryDto } from './dto/list-channel-videos-query.dto';
+import {
   ListMyVideosQueryDto,
   MyVideosSort,
 } from './dto/list-my-videos-query.dto';
@@ -59,6 +65,7 @@ import { generatePublicId } from './public-id.util';
 import { ThumbnailImageService } from './thumbnail-image.service';
 import { ALLOWED_VIDEO_CONTENT_TYPES } from './video.constants';
 import { VideoStatus } from './video-status.enum';
+import { VideoVisibility } from './video-visibility.enum';
 
 const PUBLIC_ID_COLUMN = 'public_id';
 
@@ -483,6 +490,61 @@ export class VideosService {
       })),
     );
     return buildPage(items, query.page, query.pageSize, total);
+  }
+
+  async listChannelVideos(
+    nickname: string,
+    query: ListChannelVideosQueryDto,
+  ): Promise<ChannelVideosPageDto> {
+    const channel = await this.channels.findOneBy({ nickname });
+    if (!channel) throw new ChannelNotFoundException();
+    const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+
+    const publishedAtMs = "date_trunc('milliseconds', video.published_at)";
+    const qb = this.videos
+      .createQueryBuilder('video')
+      .where('video.channel_id = :channelId', { channelId: channel.id })
+      .andWhere('video.status = :status', { status: VideoStatus.READY })
+      .andWhere('video.published_at IS NOT NULL')
+      .andWhere('video.visibility = :visibility', {
+        visibility: VideoVisibility.PUBLIC,
+      });
+    if (cursor) {
+      qb.andWhere(`(${publishedAtMs}, video.id) < (:publishedAt, :cursorId)`, {
+        publishedAt: cursor.publishedAt,
+        cursorId: cursor.id,
+      });
+    }
+
+    const rows = await qb
+      .orderBy(publishedAtMs, 'DESC')
+      .addOrderBy('video.id', 'DESC')
+      .limit(query.limit + 1)
+      .getMany();
+
+    const hasMore = rows.length > query.limit;
+    const videos = hasMore ? rows.slice(0, query.limit) : rows;
+    const last = videos[videos.length - 1];
+
+    const items: ChannelVideoItemDto[] = await Promise.all(
+      videos.map(async (video) => ({
+        id: video.public_id,
+        title: video.title,
+        thumbnailUrl: video.thumbnail_key
+          ? await this.storage.presignGetObject(video.thumbnail_key)
+          : null,
+        durationSeconds: video.duration_seconds,
+        publishedAt: video.published_at!.toISOString(),
+        viewCount: video.view_count,
+      })),
+    );
+    return {
+      items,
+      nextCursor:
+        hasMore && last
+          ? encodeCursor({ publishedAt: last.published_at!, id: last.id })
+          : null,
+    };
   }
 
   private applyPublicationState(

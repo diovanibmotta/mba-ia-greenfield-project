@@ -781,4 +781,59 @@ describe('VideosService (integration)', () => {
       expect(page.total).toBe(2);
     });
   });
+
+  describe('listChannelVideos', () => {
+    it('should walk every page without repeating or skipping videos', async () => {
+      const { channel } = await createUserWithChannel(dataSource);
+      const repository = dataSource.getRepository(Video);
+      const sameInstant = new Date('2026-10-05T10:00:00.000Z');
+      const expected: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        const saved = await repository.save(
+          repository.create({
+            public_id: `WALK${String(i).padStart(7, '0')}`,
+            channel_id: channel.id,
+            title: `Video ${i}`,
+            status: VideoStatus.READY,
+            // ties on purpose: the id must break them
+            published_at: i < 4 ? sameInstant : new Date(2026, 9, 6 + i),
+            file_name: 'a.mp4',
+            content_type: 'video/mp4',
+            declared_size: 1000,
+            storage_key: `videos/walk-${i}/original.mp4`,
+          }),
+        );
+        expected.push(saved.public_id);
+      }
+      await repository.save(
+        repository.create({
+          public_id: 'WALKHIDDEN1',
+          channel_id: channel.id,
+          title: 'hidden',
+          status: VideoStatus.READY,
+          published_at: new Date(),
+          visibility: VideoVisibility.UNLISTED,
+          file_name: 'a.mp4',
+          content_type: 'video/mp4',
+          declared_size: 1000,
+          storage_key: 'videos/walk-hidden/original.mp4',
+        }),
+      );
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await service.listChannelVideos(channel.nickname, {
+          limit: 3,
+          cursor,
+        });
+        seen.push(...page.items.map((item) => item.id));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+
+      expect(seen).toHaveLength(7);
+      expect(new Set(seen).size).toBe(7);
+      expect([...seen].sort()).toEqual([...expected].sort());
+    });
+  });
 });
