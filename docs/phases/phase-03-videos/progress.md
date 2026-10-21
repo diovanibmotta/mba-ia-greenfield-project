@@ -8,7 +8,7 @@
 - **Tests:** 11 passing (`src/config`: env.validation integration + swagger config spec); `npx tsc --noEmit` clean
 - **Observations:**
   - MinIO images `minio/minio` (Docker Hub) and `quay.io/minio/*` are no longer pullable; Compose uses `cgr.dev/chainguard/minio:latest`. That image is distroless: no healthcheck (`minio` is `service_started`) and no `mc`, so the planned `createbuckets` init job was dropped — the bucket must be created by `StorageBootstrapService` (SI-03.3), which needs a startup retry because MinIO may still be booting.
-  - `video-worker` has `profiles: ["worker"]` and runs `npm run start:worker:dev`, which only exists after SI-03.9; start it with `docker compose up -d video-worker`.
+  - `video-worker` runs `npm run start:worker:dev` (script added in SI-03.9) and starts with the default `docker compose up -d` (the temporary `worker` profile was removed after review).
   - Added optional `STORAGE_PUBLIC_ENDPOINT` (not in the plan) so presigned URLs can use a host reachable outside the Docker network; defaults to `STORAGE_ENDPOINT`.
   - Installed `bullmq ^6.3.14`, `@nestjs/bullmq ^12.0.0` (later replaced by `^11.0.5` plus `ioredis`, see SI-03.7), `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner ^3.1150.0`.
   - `STORAGE_ACCESS_KEY`/`STORAGE_SECRET_KEY` are now required; local gitignored `.env` was updated, and CI/other environments must define them.
@@ -135,4 +135,4 @@
   - Final verification (whole plan): `tsc --noEmit` clean, `npm run build` ok, `npm test -- --runInBand` 41 suites / 284 tests passing, `npm run test:e2e -- --runInBand` 11 suites / 93 tests passing, `openapi.json` regenerated (+8 `/videos` paths).
   - Cross-cutting: `test/jest-e2e.json` now sets `testTimeout: 60000` — booting `AppModule` (now with Redis, MinIO bootstrap and BullMQ) exceeds Jest's default 5s `beforeAll` timeout in the existing auth/app/swagger e2e suites.
   - Running Prettier over `src`/`test` in the container normalised line endings (HEAD stores LF) and reformatted two Handlebars templates; those were reverted, so use `git diff --ignore-space-at-eol` to see real changes.
-  - Follow-ups outside this plan: CI and any other environment must define `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` and provide Redis and an S3-compatible store; the abandoned-multipart lifecycle rule is not applied on local MinIO; the `video-worker` Compose service is behind the `worker` profile.
+  - Follow-ups outside this plan: CI and any other environment must define `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` and provide Redis and an S3-compatible store; the abandoned-multipart lifecycle rule is not applied on local MinIO; stop `video-worker` before running the integration/e2e suites, since it consumes the same queue.
