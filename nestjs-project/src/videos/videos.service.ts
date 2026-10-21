@@ -51,6 +51,7 @@ import { ListChannelVideosQueryDto } from './dto/list-channel-videos-query.dto';
 import {
   ListMyVideosQueryDto,
   MyVideosSort,
+  SortOrder,
 } from './dto/list-my-videos-query.dto';
 import { MyVideoItemDto } from './dto/my-video-item.dto';
 import { ThumbnailResponseDto } from './dto/thumbnail-response.dto';
@@ -461,7 +462,7 @@ export class VideosService {
     const [videos, total] = await qb
       .orderBy(
         MY_VIDEOS_SORT_COLUMNS[query.sort],
-        query.order === 'asc' ? 'ASC' : 'DESC',
+        query.order === SortOrder.ASC ? 'ASC' : 'DESC',
         'NULLS LAST',
       )
       .addOrderBy('video.id', 'ASC')

@@ -186,7 +186,9 @@ describe('VideosService', () => {
     it('should build the storage key from the internal id and the file extension', async () => {
       await service.createDraft('user-1', { ...dto, fileName: 'Aula.MOV' });
 
-      const saved = videos.create.mock.calls[0][0] as Partial<Video>;
+      const saved = (
+        videos.create.mock.calls as unknown[][]
+      )[0][0] as Partial<Video>;
       expect(saved.storage_key).toBe(`videos/${saved.id}/original.mov`);
       expect(storage.createMultipartUpload).toHaveBeenCalledWith(
         saved.storage_key,
@@ -197,7 +199,9 @@ describe('VideosService', () => {
     it('should fall back to the content type extension when the file name has none', async () => {
       await service.createDraft('user-1', { ...dto, fileName: 'aula' });
 
-      const saved = videos.create.mock.calls[0][0] as Partial<Video>;
+      const saved = (
+        videos.create.mock.calls as unknown[][]
+      )[0][0] as Partial<Video>;
       expect(saved.storage_key).toMatch(/original\.mp4$/);
     });
 

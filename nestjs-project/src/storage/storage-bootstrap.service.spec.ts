@@ -42,8 +42,12 @@ describe('StorageBootstrapService', () => {
 
     await buildService(send).ensureBucket();
 
-    expect(send.mock.calls[0][0]).toBeInstanceOf(HeadBucketCommand);
-    expect(send.mock.calls[1][0]).toBeInstanceOf(CreateBucketCommand);
+    expect((send.mock.calls as unknown[][])[0][0]).toBeInstanceOf(
+      HeadBucketCommand,
+    );
+    expect((send.mock.calls as unknown[][])[1][0]).toBeInstanceOf(
+      CreateBucketCommand,
+    );
   });
 
   it('should not create the bucket when it already exists', async () => {
@@ -60,8 +64,9 @@ describe('StorageBootstrapService', () => {
     const applied = await buildService(send).ensureLifecycle();
 
     expect(applied).toBe(true);
-    const command = send.mock
-      .calls[0][0] as PutBucketLifecycleConfigurationCommand;
+    const command = (
+      send.mock.calls as unknown[][]
+    )[0][0] as PutBucketLifecycleConfigurationCommand;
     expect(command).toBeInstanceOf(PutBucketLifecycleConfigurationCommand);
     expect(command.input.LifecycleConfiguration?.Rules?.[0]).toMatchObject({
       Status: 'Enabled',
