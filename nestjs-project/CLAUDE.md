@@ -13,6 +13,8 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **MinIO:** `curl http://localhost:9000/minio/health/live` — expect `200`
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -34,6 +36,12 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `redis` — Redis 7, port `6379` (BullMQ queue backend)
+- `minio` — S3-compatible object storage, API `9000`, console `9001` (credentials from `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY`)
+- `video-worker` — same image as the API, runs `npm run start:worker:dev` (entrypoint `src/worker.ts`); consumes the `video-processing` queue. Needs `ffmpeg`/`ffprobe` (installed in `Dockerfile.dev`)
+- `mailpit` — SMTP capture, SMTP `1025`, UI `8025`
+
+**Stop `video-worker` before running integration/e2e suites** (`docker compose stop video-worker`): it consumes the same `video-processing` queue the tests exercise and would steal their jobs. The processor integration test starts its own worker.
 
 All verification and teardown commands run on the **host machine**:
 
@@ -148,6 +156,22 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+## Videos (Phase 03)
+
+Modules: `src/videos/` (`VideosModule`: controllers, `VideosService`, `Video` entity, `VideoStatus`/`VideoVisibility` enums), `src/storage/` (`StorageModule`: S3 client, multipart, presigned URLs, bucket bootstrap), `src/queue/` (`VideoQueueModule`: BullMQ queue `video-processing`, job `video.process` with `{ videoId }`), `src/worker/` (`VideoProcessingProcessor`, `VideoProbeService` via ffprobe, `ThumbnailService` via ffmpeg). The worker entrypoint is `src/worker.ts` + `src/worker.module.ts` (NestJS application context, no HTTP port). Migration: `CreateVideos` in `src/database/migrations/`. Plan and decisions: `docs/phases/phase-03-videos/` and `docs/decisions/technical-decisions-phase-03-videos.md`.
+
+**Upload flow (the API never receives the file bytes):** `POST /videos` pre-registers a draft (`rascunho`) and opens an S3 multipart upload → client asks `POST /videos/:publicId/upload/part-urls` and `PUT`s each part straight to the storage (MinIO) → `GET /videos/:publicId/upload/parts` lists stored parts (resume) → `POST /videos/:publicId/upload/complete` completes the multipart, sets `processando` and enqueues `video.process`. `DELETE /videos/:publicId/upload` cancels a draft. Max size `VIDEO_MAX_SIZE_BYTES` (10 GB), part size `VIDEO_PART_SIZE_BYTES`.
+
+**Processing:** the worker runs ffprobe (duration/metadata) and extracts one frame as thumbnail (10% of duration, minimum 1 s), then sets `pronto`. Retries (`VIDEO_PROCESSING_ATTEMPTS`, exponential backoff) happen inside `processando`; on final failure the video becomes `erro` with `error_reason` (`INVALID_MEDIA` fails on the first attempt). Status lifecycle: `rascunho → processando → pronto | erro`.
+
+**Reading:** `GET /videos/:publicId` (optional auth), `GET /videos/:publicId/stream` and `/download` return a presigned GET URL served directly by the storage (Range/206 handled by MinIO/S3). `pronto` videos are visible to anyone; other statuses only to the owning channel (otherwise `VIDEO_NOT_FOUND`). Each video has a unique 11-char base62 `public_id` used in all URLs; storage keys use the internal UUID (`videos/<id>/original.<ext>`).
+
+**Management (Phase 04, same module):** `PATCH /videos/:publicId`, `POST /videos/:publicId/publish`, `PUT /videos/:publicId/thumbnail`, `GET /me/videos`, `GET /channels/:nickname/videos`, `GET /categories`, `GET`/`PATCH /me/channel`, `GET /channels/:nickname`.
+
+**Env vars:** `STORAGE_*` (endpoint, region, bucket, access/secret key, path style, presign TTL, optional `STORAGE_PUBLIC_ENDPOINT` for URLs reachable outside Docker), `REDIS_HOST`/`REDIS_PORT`, `VIDEO_*` (see `.env.example`). Hosts are Compose service names (`minio`, `redis`).
+
+**Known limitation:** the abandoned-multipart lifecycle rule is not applied on local MinIO (it rejects it); it only takes effect on real S3.
 
 ## Code Conventions
 
